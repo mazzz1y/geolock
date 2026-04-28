@@ -1,0 +1,13 @@
+{
+  "name": { "en-US": "GeoLock" },
+  "summary": { "en-US": "Per-page request firewall with geoip, geosite, domain regex, and IP range rules" },
+  "description": { "en-US": "GeoLock is a Firefox extension that blocks or allows sub-resource requests with per-page rules using v2fly geoip/geosite, domain regex, and IP range matchers." },
+  "default_locale": "en-US",
+  "homepage": { "en-US": "https://github.com/mazzz1y/geolock" },
+  "tags": ["privacy", "security"],
+  "categories": { "firefox": ["privacy-security"] },
+  "version": {
+    "license": "MIT",
+    "approval_notes": "Build: npm ci && npm run build. Plain ES modules, no bundler or minification. Tests: node tests/run.mjs. Geo data is fetched at runtime from user-configured URLs (not bundled)."
+  }
+}

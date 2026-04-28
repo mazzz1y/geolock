@@ -8,5 +8,6 @@ export default {
     '.github/**',
     'package.json',
     'package-lock.json',
+    'amo-metadata.json',
   ],
 };
