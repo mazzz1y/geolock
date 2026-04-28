@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GeoLock</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main id="app">
+      <header>
+        <h1>GeoLock</h1>
+        <p id="status-line" class="muted">Loading…</p>
+      </header>
+
+      <section class="card" id="rules-card">
+        <h2>Rules</h2>
+        <p class="muted">Each rule matches a website (page) and a resource (sub-request) and decides whether to allow or block</p>
+        <div class="row">
+          <label class="inline">Default action
+            <select id="default-action">
+              <option value="allow">Allow</option>
+              <option value="block">Block</option>
+            </select>
+          </label>
+        </div>
+        <div id="rules-list"></div>
+        <div class="card-actions">
+          <button id="rule-add" class="primary">Add rule</button>
+        </div>
+      </section>
+
+      <section class="card" id="tester-card">
+        <h2>Tester</h2>
+        <p class="muted">Evaluate a hypothetical request against your rules</p>
+        <div class="grid">
+          <label>Website URL
+            <input type="url" id="test-website" placeholder="https://example.com" />
+          </label>
+          <label>Resource URL
+            <input type="url" id="test-resource" placeholder="https://cdn.example.net/foo.js" />
+          </label>
+          <label>Resource IP override (optional)
+            <input type="text" id="test-ip" placeholder="1.2.3.4" />
+          </label>
+        </div>
+        <div class="card-actions">
+          <button id="test-run" class="primary">Evaluate</button>
+        </div>
+        <div id="test-output" class="tester-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card" id="data-card">
+        <h2>Data sources</h2>
+        <p class="muted">v2fly geoip and geosite database files; updates run on a schedule when auto-update is on</p>
+        <div class="data-row" id="data-geoip"></div>
+        <div class="data-row" id="data-geosite"></div>
+        <div class="card-actions">
+          <button id="data-save-all">Save all</button>
+          <button id="data-update-all" class="primary">Update all now</button>
+          <span id="data-save-all-status" class="status-text muted" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="card" id="dns-card">
+        <h2>DNS</h2>
+        <p class="muted">DNS resolution cache controls how often the extension queries the system resolver while evaluating requests</p>
+        <div class="grid">
+          <label>Cache TTL (s)
+            <input type="number" id="dns-ttl" min="0" max="86400" class="num-fixed" />
+          </label>
+          <label>Negative cache TTL (s)
+            <input type="number" id="dns-neg-ttl" min="0" max="3600" class="num-fixed" />
+          </label>
+          <label>Lookup timeout (ms)
+            <input type="number" id="dns-timeout" min="50" max="30000" class="num-fixed" />
+          </label>
+          <label>IP match strategy
+            <select id="dns-match-strategy">
+              <option value="first">First IP only (fast)</option>
+              <option value="all">All resolved IPs</option>
+            </select>
+          </label>
+        </div>
+        <div class="card-actions">
+          <button id="dns-save" class="primary">Save</button>
+          <button id="dns-clear-cache">Clear cache</button>
+          <span id="dns-status" class="status-text muted" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="card" id="remote-card">
+        <h2>Remote configuration</h2>
+        <p class="muted">Optionally fetch and apply a configuration JSON from a URL</p>
+        <div class="row">
+          <label class="grow">URL
+            <input type="url" id="remote-url" placeholder="https://example.com/geolock.json" />
+          </label>
+        </div>
+        <div class="row spaced">
+          <label class="inline"><input type="checkbox" id="remote-auto" /> Auto-update</label>
+          <label class="inline">Interval (h)
+            <input type="number" id="remote-interval" min="1" class="num-fixed" />
+          </label>
+        </div>
+        <p id="remote-last-fetched" class="muted small"></p>
+        <div class="card-actions">
+          <button id="remote-save">Save</button>
+          <button id="remote-fetch" class="primary">Fetch now</button>
+          <span id="remote-status" class="status-text muted" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="card" id="json-card">
+        <h2>Raw configuration</h2>
+        <p class="muted">Backup, restore, or hand-edit the full configuration document</p>
+        <div class="card-actions">
+          <button id="export-config">Export</button>
+          <button id="import-config">Import</button>
+          <input type="file" id="import-file" accept="application/json" hidden />
+          <button id="reset-config" class="danger">Reset</button>
+        </div>
+        <details>
+          <summary>Raw JSON</summary>
+          <textarea id="json-editor" rows="20" spellcheck="false"></textarea>
+          <div class="card-actions">
+            <button id="json-apply" class="primary">Apply</button>
+            <button id="json-revert">Revert</button>
+            <span id="json-status" class="status-text muted" aria-live="polite"></span>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <dialog id="rule-dialog" aria-labelledby="rule-dialog-title">
+      <form method="dialog">
+        <h3 id="rule-dialog-title">Edit rule</h3>
+        <label>Name
+          <input type="text" id="rule-name" />
+        </label>
+        <label class="inline"><input type="checkbox" id="rule-enabled" /> Enabled</label>
+        <label class="inline"><input type="checkbox" id="rule-bidirectional" /> Bidirectional</label>
+        <p class="muted small">Also fires when website and resource matchers are swapped</p>
+        <fieldset>
+          <legend>Website matcher</legend>
+          <div id="rule-website"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Resource matcher</legend>
+          <div id="rule-resource"></div>
+        </fieldset>
+        <label class="inline">Action
+          <select id="rule-action">
+            <option value="block">Block</option>
+            <option value="allow">Allow</option>
+          </select>
+        </label>
+        <p id="rule-error" class="error"></p>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="rule-save" value="save" class="primary">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Set manifest version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting manifest.json version to ${VERSION}"
+          jq --arg v "$VERSION" '.version = $v' manifest.json > manifest.json.tmp
+          mv manifest.json.tmp manifest.json
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Sign and submit to AMO (listed)
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          npx web-ext sign \
+            --channel=listed \
+            --source-dir=. \
+            --upload-source-code
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            web-ext-artifacts/*.xpi \
+            web-ext-artifacts/*.zip

@@ -1,0 +1,13 @@
+{
+  "name": "geolock",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "build": "web-ext build --overwrite-dest"
+  },
+  "devDependencies": {
+    "web-ext": "^8.3.0"
+  }
+}
