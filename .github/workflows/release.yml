@@ -31,16 +31,16 @@ jobs:
 
       - run: npm run build
 
-      # - name: Submit to AMO
-      #   env:
-      #     WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
-      #     WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
-      #   run: |
-      #     npx web-ext sign \
-      #       --channel=listed \
-      #       --source-dir=. \
-      #       --amo-metadata=amo-metadata.json \
-      #       --approval-timeout=0
+      - name: Submit to AMO
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          npx web-ext sign \
+            --channel=listed \
+            --source-dir=. \
+            --amo-metadata=amo-metadata.json \
+            --approval-timeout=0
 
       - name: Create GitHub Release
         env:

@@ -1,10 +1,14 @@
 {
   "name": { "en-US": "GeoLock" },
-  "summary": { "en-US": "Per-page request firewall with geoip, geosite, domain regex, and IP range rules" },
-  "description": { "en-US": "GeoLock is a Firefox extension that blocks or allows sub-resource requests with per-page rules using v2fly geoip/geosite, domain regex, and IP range matchers." },
+  "summary": {
+    "en-US": "Per-page request firewall with geoip, geosite, domain/URL regex, and IP range rules"
+  },
+  "description": {
+    "en-US": "GeoLock is a Firefox extension that gives you fine-grained control over sub-resource requests on a per-page basis.\n\nFor every request initiated by a webpage, GeoLock evaluates a configurable list of rules and decides whether to block or allow it. Rules can match on:\n\n• geoip — country code from a v2fly-format database (resolved via DNS at runtime)\n• geosite — domain category from a v2fly-format database\n• domain — regular expression against the host\n• url — regular expression against the full URL\n• ip — CIDR (IPv4 or IPv6)\n• logical combinators: AND, OR, NOT, with optional bidirectional matching\n\nRules support a website matcher (where the request was initiated) and a resource matcher (the request target), with separate evaluation for each side. A rule fires only when its conditions definitively match; rules abstain when the data needed to decide is missing, falling through to the next rule or the default action.\n\nGeoIP/Geosite databases are not bundled. You configure HTTPS URLs to v2fly-format .dat files and GeoLock fetches and caches them on a schedule of your choice.\n\nNo telemetry. No data leaves your browser except DNS lookups and the data-source URLs you configure.\n\nSource: https://github.com/mazzz1y/geolock"
+  },
   "default_locale": "en-US",
   "homepage": { "en-US": "https://github.com/mazzz1y/geolock" },
-  "tags": ["privacy", "security"],
+  "tags": ["privacy", "security", "content blocker", "anti tracker"],
   "categories": {
     "firefox": ["privacy-security"],
     "android": ["privacy-security"]
@@ -12,6 +16,6 @@
   "version": {
     "license": "MIT",
     "compatibility": ["firefox", "android"],
-    "approval_notes": "Build: npm ci && npm run build. Plain ES modules, no bundler or minification. Tests: node tests/run.mjs. Geo data is fetched at runtime from user-configured URLs (not bundled)."
+    "approval_notes": "Build: npm ci && npm run build. Plain ES modules, no bundler or minification. Tests: node tests/run.mjs (139 unit tests, all passing).\n\nPermissions:\n- webRequest + webRequestBlocking: required to inspect and cancel sub-resource requests as the rules engine matches them.\n- webNavigation: required to associate sub-resource requests with the originating page (frame tracking).\n- host_permissions <all_urls>: required because the firewall must see every outgoing request to apply rules; cannot be narrowed without losing core functionality.\n- dns: used to resolve hostnames for geoip/ip matchers; lookups are local to the browser.\n- storage, alarms: configuration persistence and scheduled geo-data updates.\n\nNo telemetry, no analytics, no remote code. data_collection_permissions is set to [\"none\"] in manifest.json. Geo databases are fetched from user-configured HTTPS URLs at runtime; no databases are bundled.\n\nAndroid: gecko_android.strict_min_version is 142.0 in manifest.json (matches desktop floor). MV3 background scripts (event-page style) are used; no service workers."
   }
 }
