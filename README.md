@@ -6,11 +6,16 @@
 
 GeoLock is a Firefox extension that blocks or allows sub-resource requests with per-page rules using v2fly geoip/geosite, domain regex, and IP range matchers.
 
+[<img src="https://blog.mozilla.org/addons/files/2020/04/get-the-addon-fx-apr-2020.svg"
+alt="Get it on Firefox Add-ons"
+height="54">](https://addons.mozilla.org/firefox/addon/84ec3815000144658945/)
+
+
+## Features
+
 You write rules that combine a **website** (the page the user is on) with a **resource** (what that page is loading), and decide whether to allow or block.
 
 ![GeoLock options page](.github/screenshot.png)
-
-## Features
 
 - Per-website rules: match on both the page and the resource it loads
 - Matcher types: geosite category, geoip country, domain regex, IP CIDR, composites (`all_of`, `any_of`, `not`)
