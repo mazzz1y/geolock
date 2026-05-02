@@ -268,4 +268,106 @@ export const tests = [
       assert.equal(result.matchedRule.direction, 'reverse');
     },
   },
+  {
+    name: 'bidirectional NOT does not fire when website host empty (peel reproducer)',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          bidirectional: true,
+          name: 'RU',
+          website: { kind: 'geosite', tag: 'google' },
+          resource: { kind: 'not', term: { kind: 'geosite', tag: 'google' } },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        website: { host: '', url: '', ips: [] },
+        resource: { host: 'mail.google.com', url: 'https://mail.google.com/', ips: [] },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'allow');
+      assert.equal(result.matchedRule, null);
+    },
+  },
+  {
+    name: 'forward NOT geoip does not fire when ips empty',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          website: { kind: 'any' },
+          resource: { kind: 'not', term: { kind: 'geoip', tag: 'cn' } },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        website: { host: 'a' },
+        resource: { host: 'b', ips: [] },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'allow');
+      assert.equal(result.matchedRule, null);
+    },
+  },
+  {
+    name: 'NOT subtree with present data still fires normally',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          website: { kind: 'any' },
+          resource: { kind: 'not', term: { kind: 'geosite', tag: 'google' } },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        website: { host: 'a' },
+        resource: { host: 'example.com' },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'block');
+    },
+  },
+  {
+    name: 'rule fires when only resource side has data',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          website: { kind: 'any' },
+          resource: { kind: 'geosite', tag: 'google' },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        website: { host: '' },
+        resource: { host: 'mail.google.com' },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'block');
+    },
+  },
+  {
+    name: 'trace: UNDECIDED website yields null hits and no resource subtree',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          website: { kind: 'geosite', tag: 'google' },
+          resource: { kind: 'any' },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        website: { host: '' },
+        resource: { host: 'b' },
+      }, geo, preResolved(), { trace: true });
+      assert.equal(result.trace.length, 1);
+      assert.equal(result.trace[0].websiteHit, null);
+      assert.equal(result.trace[0].resourceHit, null);
+      assert.equal(result.trace[0].resourceTrace, null);
+    },
+  },
 ];

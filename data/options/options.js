@@ -642,8 +642,8 @@ async function runTester() {
   const resourceUrl = $('test-resource').value.trim();
   const resourceIp = $('test-ip').value.trim();
   const output = $('test-output');
-  if (!websiteUrl || !resourceUrl) {
-    output.replaceChildren(elem('span', { class: 'muted' }, 'Provide both URLs'));
+  if (!resourceUrl) {
+    output.replaceChildren(elem('span', { class: 'muted' }, 'Provide a resource URL'));
     return;
   }
   output.replaceChildren(elem('span', { class: 'muted' }, 'Evaluating…'));
@@ -686,7 +686,8 @@ function formatIps(ips) {
 }
 
 function formatHit(value) {
-  if (value === null || value === undefined) return '—';
+  if (value === undefined) return '—';
+  if (value === null) return 'n/a';
   return value ? 'HIT' : 'miss';
 }
 
@@ -702,7 +703,7 @@ function formatMatcherTrace(node, indent) {
 }
 
 function describeTraceNode(node) {
-  const verdict = node.hit ? '[+]' : '[-]';
+  const verdict = node.hit === null ? '[?]' : node.hit ? '[+]' : '[-]';
   const note = node.note ? ` (${node.note})` : '';
   switch (node.kind) {
     case 'any': return `${verdict} any`;

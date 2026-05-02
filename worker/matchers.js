@@ -2,6 +2,23 @@ import { parseCidr, ipInCidr, ipToString } from '../lib/ip.js';
 
 export const MATCHER_KINDS = ['any', 'geosite', 'geoip', 'domain', 'url', 'ip', 'all_of', 'any_of', 'not'];
 
+// Tri-state sentinel for "cannot decide with current context data".
+export const UNDECIDED = Symbol('undecided');
+
+export const andK = (a, b) =>
+  a === false || b === false ? false :
+  a === true && b === true ? true :
+  UNDECIDED;
+
+export const orK = (a, b) =>
+  a === true || b === true ? true :
+  a === false && b === false ? false :
+  UNDECIDED;
+
+export const notK = a => a === UNDECIDED ? UNDECIDED : !a;
+
+export const traceValue = v => v === UNDECIDED ? null : v;
+
 const regexCache = new WeakMap();
 
 function compileRegex(matcher) {
@@ -48,9 +65,13 @@ function matchGeosite(matcher, ctx, geo, trace) {
   const tag = String(matcher.tag ?? '').toLowerCase();
   const attr = matcher.attr ? String(matcher.attr).toLowerCase() : null;
   const host = ctx?.host ?? '';
-  if (!host || !tag) {
-    trace?.push({ kind: 'geosite', tag, attr, host, hit: false, note: !host ? 'empty host' : 'empty tag' });
+  if (!tag) {
+    trace?.push({ kind: 'geosite', tag, attr, host, hit: false, note: 'empty tag' });
     return false;
+  }
+  if (!host) {
+    trace?.push({ kind: 'geosite', tag, attr, host, hit: null, note: 'empty host' });
+    return UNDECIDED;
   }
   const hit = geo.inGeositeTag(host, tag, attr);
   trace?.push({ kind: 'geosite', tag, attr, host, hit });
@@ -60,9 +81,13 @@ function matchGeosite(matcher, ctx, geo, trace) {
 function matchGeoip(matcher, ctx, geo, trace) {
   const tag = String(matcher.tag ?? '').toLowerCase();
   const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
-  if (ips.length === 0 || !tag) {
-    trace?.push({ kind: 'geoip', tag, ips: [], hit: false, note: ips.length === 0 ? 'no ip resolved' : 'empty tag' });
+  if (!tag) {
+    trace?.push({ kind: 'geoip', tag, ips: ips.map(formatIp), hit: false, note: 'empty tag' });
     return false;
+  }
+  if (ips.length === 0) {
+    trace?.push({ kind: 'geoip', tag, ips: [], hit: null, note: 'no ip resolved' });
+    return UNDECIDED;
   }
   const perIp = ips.map(ip => ({ ip: formatIp(ip), hit: geo.inGeoipTag(ip, tag) }));
   const hit = perIp.some(item => item.hit);
@@ -73,9 +98,13 @@ function matchGeoip(matcher, ctx, geo, trace) {
 function matchDomain(matcher, ctx, trace) {
   const host = ctx?.host ?? '';
   const compiled = compileRegex(matcher);
-  if (!host || !compiled) {
-    trace?.push({ kind: 'domain', regex: matcher.regex, host, hit: false, note: !host ? 'empty host' : 'invalid regex' });
+  if (!compiled) {
+    trace?.push({ kind: 'domain', regex: matcher.regex, host, hit: false, note: 'invalid regex' });
     return false;
+  }
+  if (!host) {
+    trace?.push({ kind: 'domain', regex: matcher.regex, host, hit: null, note: 'empty host' });
+    return UNDECIDED;
   }
   const hit = compiled.test(host);
   trace?.push({ kind: 'domain', regex: matcher.regex, host, hit });
@@ -85,9 +114,13 @@ function matchDomain(matcher, ctx, trace) {
 function matchUrl(matcher, ctx, trace) {
   const url = ctx?.url ?? '';
   const compiled = compileRegex(matcher);
-  if (!url || !compiled) {
-    trace?.push({ kind: 'url', regex: matcher.regex, url, hit: false, note: !url ? 'empty url' : 'invalid regex' });
+  if (!compiled) {
+    trace?.push({ kind: 'url', regex: matcher.regex, url, hit: false, note: 'invalid regex' });
     return false;
+  }
+  if (!url) {
+    trace?.push({ kind: 'url', regex: matcher.regex, url, hit: null, note: 'empty url' });
+    return UNDECIDED;
   }
   const hit = compiled.test(url);
   trace?.push({ kind: 'url', regex: matcher.regex, url, hit });
@@ -97,9 +130,13 @@ function matchUrl(matcher, ctx, trace) {
 function matchIp(matcher, ctx, trace) {
   const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
   const cidr = parseCidr(String(matcher.cidr ?? ''));
-  if (ips.length === 0 || !cidr) {
-    trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit: false, note: ips.length === 0 ? 'no ip resolved' : 'invalid cidr' });
+  if (!cidr) {
+    trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit: false, note: 'invalid cidr' });
     return false;
+  }
+  if (ips.length === 0) {
+    trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: [], hit: null, note: 'no ip resolved' });
+    return UNDECIDED;
   }
   const hit = ips.some(ip => cidr.family === ip.family && ipInCidr(ip.bytes, cidr.bytes, cidr.prefix));
   trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit });
@@ -112,21 +149,22 @@ function matchComposite(kind, terms, ctx, geo, trace) {
     return false;
   }
   const childTrace = trace ? [] : null;
-  const requireAll = kind === 'all_of';
-  let hit = requireAll;
+  const combine = kind === 'all_of' ? andK : orK;
+  const shortCircuit = kind === 'all_of' ? false : true;
+  let hit = kind === 'all_of' ? true : false;
   for (const term of terms) {
     const termHit = matches(term, ctx, geo, childTrace);
-    if (requireAll && !termHit) { hit = false; if (!trace) break; }
-    if (!requireAll && termHit) { hit = true; if (!trace) break; }
+    hit = combine(hit, termHit);
+    if (hit === shortCircuit && !trace) break;
   }
-  trace?.push({ kind, hit, terms: childTrace });
+  trace?.push({ kind, hit: traceValue(hit), terms: childTrace });
   return hit;
 }
 
 function matchNot(matcher, ctx, geo, trace) {
   const childTrace = trace ? [] : null;
-  const hit = !matches(matcher.term, ctx, geo, childTrace);
-  trace?.push({ kind: 'not', hit, term: childTrace?.[0] ?? null });
+  const hit = notK(matches(matcher.term, ctx, geo, childTrace));
+  trace?.push({ kind: 'not', hit: traceValue(hit), term: childTrace?.[0] ?? null });
   return hit;
 }
 

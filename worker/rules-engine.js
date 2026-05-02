@@ -1,4 +1,4 @@
-import { matches } from './matchers.js';
+import { matches, andK, orK, traceValue } from './matchers.js';
 import { ipToString } from '../lib/ip.js';
 
 export async function evaluate(config, contexts, geo, deps = {}, { trace: collectTrace = false } = {}) {
@@ -27,52 +27,54 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
     const websiteSubtrace = trace ? [] : null;
     const websiteHit = matches(rule.website, contexts.website, geo, websiteSubtrace);
 
-    if (websiteHit && resolveResource && matcherNeedsIp(rule.resource)) {
+    if (websiteHit === true && resolveResource && matcherNeedsIp(rule.resource)) {
       await resolveResource(contexts.resource);
       resolveResource = null;
     }
 
-    const resourceSubtrace = trace && websiteHit ? [] : null;
-    const resourceHit = websiteHit && matches(rule.resource, contexts.resource, geo, resourceSubtrace);
+    const resourceSubtrace = trace && websiteHit === true ? [] : null;
+    const resourceHit = websiteHit === true ? matches(rule.resource, contexts.resource, geo, resourceSubtrace) : websiteHit;
 
-    let direction = null;
-    let matched = websiteHit && resourceHit;
-    if (matched) direction = isBi ? 'forward' : null;
+    const forward = andK(websiteHit, resourceHit);
+    let direction = forward === true ? (isBi ? 'forward' : null) : null;
 
     let reverseWebsiteHit = null;
     let reverseResourceHit = null;
     let reverseWebsiteTrace = null;
     let reverseResourceTrace = null;
-    if (!matched && isBi) {
+    let reverse = false;
+    if (forward !== true && isBi) {
       const revWebsiteSub = trace ? [] : null;
       const revResourceSub = trace ? [] : null;
       reverseWebsiteHit = matches(rule.resource, contexts.website, geo, revWebsiteSub);
-      reverseResourceHit = reverseWebsiteHit && matches(rule.website, contexts.resource, geo, revResourceSub);
+      reverseResourceHit = reverseWebsiteHit === true
+        ? matches(rule.website, contexts.resource, geo, revResourceSub)
+        : reverseWebsiteHit;
       reverseWebsiteTrace = revWebsiteSub?.[0] ?? null;
-      reverseResourceTrace = reverseWebsiteHit ? (revResourceSub?.[0] ?? null) : null;
-      if (reverseWebsiteHit && reverseResourceHit) {
-        matched = true;
-        direction = 'reverse';
-      }
+      reverseResourceTrace = reverseWebsiteHit === true ? (revResourceSub?.[0] ?? null) : null;
+      reverse = andK(reverseWebsiteHit, reverseResourceHit);
+      if (reverse === true) direction = 'reverse';
     }
+
+    const result = orK(forward, reverse);
 
     trace?.push({
       ruleIndex: index,
       ruleName: rule.name ?? '',
       action: rule.action,
       bidirectional: isBi,
-      websiteHit,
-      resourceHit: websiteHit ? resourceHit : null,
+      websiteHit: traceValue(websiteHit),
+      resourceHit: websiteHit === true ? traceValue(resourceHit) : null,
       websiteTrace: websiteSubtrace?.[0] ?? null,
       resourceTrace: resourceSubtrace?.[0] ?? null,
-      reverseWebsiteHit: isBi ? reverseWebsiteHit : null,
-      reverseResourceHit: isBi ? (reverseWebsiteHit ? reverseResourceHit : null) : null,
+      reverseWebsiteHit: isBi ? traceValue(reverseWebsiteHit) : null,
+      reverseResourceHit: isBi ? (reverseWebsiteHit === true ? traceValue(reverseResourceHit) : null) : null,
       reverseWebsiteTrace,
       reverseResourceTrace,
       direction,
     });
 
-    if (matched) {
+    if (result === true) {
       const matchedRule = { index, name: rule.name ?? '' };
       if (direction) matchedRule.direction = direction;
       return {
