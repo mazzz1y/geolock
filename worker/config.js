@@ -140,6 +140,7 @@ function validateMatcher(matcher, path, errors) {
       requireString(matcher.tag, `${path}/tag`, errors);
       break;
     case 'domain':
+    case 'url':
       if (typeof matcher.regex !== 'string' || !matcher.regex) {
         errors.push({ path: `${path}/regex`, message: 'must be a non-empty regex string' });
       } else {

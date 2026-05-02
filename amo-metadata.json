@@ -5,9 +5,13 @@
   "default_locale": "en-US",
   "homepage": { "en-US": "https://github.com/mazzz1y/geolock" },
   "tags": ["privacy", "security"],
-  "categories": { "firefox": ["privacy-security"] },
+  "categories": {
+    "firefox": ["privacy-security"],
+    "android": ["privacy-security"]
+  },
   "version": {
     "license": "MIT",
+    "compatibility": ["firefox", "android"],
     "approval_notes": "Build: npm ci && npm run build. Plain ES modules, no bundler or minification. Tests: node tests/run.mjs. Geo data is fetched at runtime from user-configured URLs (not bundled)."
   }
 }

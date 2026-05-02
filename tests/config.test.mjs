@@ -66,6 +66,46 @@ export const tests = [
     },
   },
   {
+    name: 'accepts url matcher',
+    run: () => {
+      const config = defaultConfig();
+      config.rules.push({
+        enabled: true, action: 'block',
+        website: { kind: 'any' },
+        resource: { kind: 'url', regex: '^https://example\\.com/api/' },
+      });
+      const result = validateConfig(config);
+      assert.equal(result.ok, true, JSON.stringify(result.errors));
+    },
+  },
+  {
+    name: 'rejects empty url regex',
+    run: () => {
+      const config = defaultConfig();
+      config.rules.push({
+        enabled: true, action: 'block',
+        website: { kind: 'url', regex: '' },
+        resource: { kind: 'any' },
+      });
+      const result = validateConfig(config);
+      assert.equal(result.ok, false);
+      assert.ok(result.errors.find(error => error.path.endsWith('/regex')));
+    },
+  },
+  {
+    name: 'rejects invalid url regex',
+    run: () => {
+      const config = defaultConfig();
+      config.rules.push({
+        enabled: true, action: 'block',
+        website: { kind: 'url', regex: '[' },
+        resource: { kind: 'any' },
+      });
+      const result = validateConfig(config);
+      assert.equal(result.ok, false);
+    },
+  },
+  {
     name: 'mergeWithDefaults fills missing fields',
     run: () => {
       const merged = mergeWithDefaults({ rules: [{ action: 'allow', website: { kind: 'any' }, resource: { kind: 'any' } }] });

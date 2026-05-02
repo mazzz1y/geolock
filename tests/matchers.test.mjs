@@ -111,4 +111,25 @@ export const tests = [
       assert.equal(matches({ kind: 'domain', regex: '[' }, { host: 'x' }, fakeGeo), false);
     },
   },
+  {
+    name: 'url regex matches full URL',
+    run: () => {
+      const ctx = { host: 'example.com', url: 'https://example.com/api/v1/items?id=1' };
+      assert.equal(matches({ kind: 'url', regex: '^https://example\\.com/api/' }, ctx, fakeGeo), true);
+      assert.equal(matches({ kind: 'url', regex: '/admin/' }, ctx, fakeGeo), false);
+    },
+  },
+  {
+    name: 'url misses when url is empty',
+    run: () => {
+      assert.equal(matches({ kind: 'url', regex: '.*' }, { host: 'h' }, fakeGeo), false);
+      assert.equal(matches({ kind: 'url', regex: '.*' }, { host: 'h', url: '' }, fakeGeo), false);
+    },
+  },
+  {
+    name: 'url invalid regex never matches',
+    run: () => {
+      assert.equal(matches({ kind: 'url', regex: '[' }, { host: 'h', url: 'https://x/' }, fakeGeo), false);
+    },
+  },
 ];

@@ -7,6 +7,7 @@ const LEAF_FIELDS = {
   },
   geoip: input => ({ tag: typeof input.tag === 'string' ? input.tag : '' }),
   domain: input => ({ regex: typeof input.regex === 'string' ? input.regex : '' }),
+  url: input => ({ regex: typeof input.regex === 'string' ? input.regex : '' }),
   ip: input => ({ cidr: typeof input.cidr === 'string' ? input.cidr : '' }),
 };
 
@@ -15,6 +16,7 @@ export const KIND_LABELS = {
   geosite: 'geosite',
   geoip: 'geoip',
   domain: 'domain',
+  url: 'url',
   ip: 'ip',
   all_of: 'AND',
   any_of: 'OR',
@@ -57,6 +59,8 @@ export function serializeMatcher(node) {
       return { kind: 'geoip', tag: String(node.tag ?? '') };
     case 'domain':
       return { kind: 'domain', regex: String(node.regex ?? '') };
+    case 'url':
+      return { kind: 'url', regex: String(node.regex ?? '') };
     case 'ip':
       return { kind: 'ip', cidr: String(node.cidr ?? '') };
     case 'all_of':

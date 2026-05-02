@@ -163,6 +163,7 @@ function describeMatcher(matcher) {
     case 'geosite': return `geosite:${matcher.tag}${matcher.attr ? '@' + matcher.attr : ''}`;
     case 'geoip':   return `geoip:${matcher.tag}`;
     case 'domain':  return `domain:/${matcher.regex}/`;
+    case 'url':     return `url:/${matcher.regex}/`;
     case 'ip':      return `ip:${matcher.cidr}`;
     case 'all_of':  return `(${matcher.terms.map(describeMatcher).join(' AND ')})`;
     case 'any_of':  return `(${matcher.terms.map(describeMatcher).join(' OR ')})`;
@@ -348,6 +349,20 @@ function createMatcherEditor(node) {
     if (node.kind === 'domain') {
       validatedLeaf({
         placeholder: 'regex (e.g. \\.example\\.com$)',
+        value: node.regex ?? '',
+        onChange: input => { node.regex = input.value; },
+        validate: value => {
+          if (!value) return '';
+          try { new RegExp(value); return ''; }
+          catch (error) { return `invalid regex: ${error.message}`; }
+        },
+      });
+      return;
+    }
+
+    if (node.kind === 'url') {
+      validatedLeaf({
+        placeholder: 'regex against full URL (e.g. ^https://example\\.com/api/)',
         value: node.regex ?? '',
         onChange: input => { node.regex = input.value; },
         validate: value => {

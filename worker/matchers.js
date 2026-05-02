@@ -1,15 +1,15 @@
 import { parseCidr, ipInCidr, ipToString } from '../lib/ip.js';
 
-export const MATCHER_KINDS = ['any', 'geosite', 'geoip', 'domain', 'ip', 'all_of', 'any_of', 'not'];
+export const MATCHER_KINDS = ['any', 'geosite', 'geoip', 'domain', 'url', 'ip', 'all_of', 'any_of', 'not'];
 
-const domainRegexCache = new WeakMap();
+const regexCache = new WeakMap();
 
-function compileDomainRegex(matcher) {
-  if (domainRegexCache.has(matcher)) return domainRegexCache.get(matcher);
+function compileRegex(matcher) {
+  if (regexCache.has(matcher)) return regexCache.get(matcher);
   let compiled;
   try { compiled = new RegExp(String(matcher.regex ?? '')); }
   catch { compiled = null; }
-  domainRegexCache.set(matcher, compiled);
+  regexCache.set(matcher, compiled);
   return compiled;
 }
 
@@ -28,6 +28,8 @@ export function matches(matcher, ctx, geo, trace = null) {
       return matchGeoip(matcher, ctx, geo, trace);
     case 'domain':
       return matchDomain(matcher, ctx, trace);
+    case 'url':
+      return matchUrl(matcher, ctx, trace);
     case 'ip':
       return matchIp(matcher, ctx, trace);
     case 'all_of':
@@ -70,13 +72,25 @@ function matchGeoip(matcher, ctx, geo, trace) {
 
 function matchDomain(matcher, ctx, trace) {
   const host = ctx?.host ?? '';
-  const compiled = compileDomainRegex(matcher);
+  const compiled = compileRegex(matcher);
   if (!host || !compiled) {
     trace?.push({ kind: 'domain', regex: matcher.regex, host, hit: false, note: !host ? 'empty host' : 'invalid regex' });
     return false;
   }
   const hit = compiled.test(host);
   trace?.push({ kind: 'domain', regex: matcher.regex, host, hit });
+  return hit;
+}
+
+function matchUrl(matcher, ctx, trace) {
+  const url = ctx?.url ?? '';
+  const compiled = compileRegex(matcher);
+  if (!url || !compiled) {
+    trace?.push({ kind: 'url', regex: matcher.regex, url, hit: false, note: !url ? 'empty url' : 'invalid regex' });
+    return false;
+  }
+  const hit = compiled.test(url);
+  trace?.push({ kind: 'url', regex: matcher.regex, url, hit });
   return hit;
 }
 

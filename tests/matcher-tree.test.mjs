@@ -23,6 +23,15 @@ export const tests = [
     },
   },
   {
+    name: 'leaf url roundtrip',
+    run: () => {
+      assert.deepEqual(
+        roundtrip({ kind: 'url', regex: '^https://example\\.com/api/' }),
+        { kind: 'url', regex: '^https://example\\.com/api/' },
+      );
+    },
+  },
+  {
     name: 'all_of populates children from terms',
     run: () => {
       const node = normalizeMatcher({

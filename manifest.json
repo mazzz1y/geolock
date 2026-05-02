@@ -31,6 +31,7 @@
   },
   "icons": {
     "48": "data/icons/icon-48.png",
-    "96": "data/icons/icon-96.png"
+    "96": "data/icons/icon-96.png",
+    "128": "data/icons/icon-128.png"
   }
 }
