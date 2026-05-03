@@ -22,10 +22,22 @@ body {
 @media (pointer: coarse) and (hover: none) {
   html, body {
     width: 100vw;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
-  html {
-    height: 100dvh;
-    max-height: 100dvh;
+  body {
+    display: block;
+    min-height: 100dvh;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  main {
+    overflow: visible;
+    height: auto;
   }
 }
 
