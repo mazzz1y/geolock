@@ -33,10 +33,18 @@ async function bootstrap() {
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes.config) return;
   const next = changes.config.newValue;
-  if (next) {
-    enforcer.setConfig(next);
-    applyDnsConfig(next.dns);
-    geo.flushWebRequestCache();
+  const prev = changes.config.oldValue;
+  if (!next) return;
+  enforcer.setConfig(next);
+  applyDnsConfig(next.dns);
+  geo.flushWebRequestCache();
+  for (const kind of ['geoip', 'geosite']) {
+    const newSource = next.data_sources?.[kind];
+    const oldUrl = prev?.data_sources?.[kind]?.url ?? '';
+    const newUrl = newSource?.url ?? '';
+    if (newUrl && newUrl !== oldUrl && newSource.auto_update !== false) {
+      updater.updateDat(kind).catch(() => {});
+    }
   }
 });
 
