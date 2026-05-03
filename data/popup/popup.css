@@ -19,7 +19,7 @@ body {
   overflow: hidden;
 }
 
-@media (max-width: 480px), (pointer: coarse) and (hover: none) {
+@media (pointer: coarse) and (hover: none) {
   html, body {
     width: 100vw;
   }
