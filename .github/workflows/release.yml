@@ -27,9 +27,28 @@ jobs:
           jq --arg v "$VERSION" '.version = $v' manifest.json > manifest.json.tmp
           mv manifest.json.tmp manifest.json
 
+      - name: Locate changelog
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CHANGELOG="metadata/en-US/changelogs/${VERSION}.txt"
+          if [ ! -f "$CHANGELOG" ]; then
+            echo "::error::Changelog not found: $CHANGELOG"
+            exit 1
+          fi
+          echo "path=$CHANGELOG" >> $GITHUB_OUTPUT
+
       - run: npm test
 
       - run: npm run build
+
+      - name: Inject release notes into amo-metadata
+        run: |
+          NOTES=$(cat "${{ steps.changelog.outputs.path }}")
+          jq --arg notes "$NOTES" \
+             '.version.release_notes = { "en-US": $notes }' \
+             metadata/amo-metadata.json > metadata/amo-metadata.json.tmp
+          mv metadata/amo-metadata.json.tmp metadata/amo-metadata.json
 
       - name: Submit to AMO
         env:
@@ -39,7 +58,7 @@ jobs:
           npx web-ext sign \
             --channel=listed \
             --source-dir=. \
-            --amo-metadata=amo-metadata.json \
+            --amo-metadata=metadata/amo-metadata.json \
             --approval-timeout=0
 
       - name: Create GitHub Release
@@ -48,5 +67,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
+            --notes-file "${{ steps.changelog.outputs.path }}" \
             web-ext-artifacts/*.zip

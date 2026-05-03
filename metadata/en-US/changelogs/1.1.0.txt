@@ -1,0 +1,2 @@
+- Add URL regex matcher for matching against full request URL
+- Fix false-positive blocks when page or resource context is incomplete

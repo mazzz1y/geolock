@@ -1,0 +1,4 @@
+- Add toolbar popup with per-tab list of blocked requests
+- Add unified trace viewer with text/JSON toggle and copy button
+- Add Save Trace button to export blocked-request data as JSON
+- Show red badge with block count on extension icon
