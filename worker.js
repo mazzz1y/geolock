@@ -3,6 +3,8 @@ import * as enforcer from './worker/enforcer.js';
 import * as updater from './worker/updater.js';
 import * as geo from './worker/geo/index.js';
 import * as dnsCache from './worker/dns-cache.js';
+import * as blockLog from './worker/block-log.js';
+import * as badge from './worker/badge.js';
 
 function applyDnsConfig(dns) {
   if (!dns) return;
@@ -17,6 +19,8 @@ async function bootstrap() {
   const config = await loadConfig();
   enforcer.setConfig(config);
   applyDnsConfig(config.dns);
+  badge.init();
+  badge.resetAllTabs().catch(() => {});
   try { await geo.reloadAll(); }
   catch (error) { console.error('GeoLock geo reload failed:', error); }
   try { await updater.rescheduleAlarms(); }
@@ -39,6 +43,17 @@ browser.storage.onChanged.addListener((changes, area) => {
 
 browser.alarms.onAlarm.addListener(alarm => {
   updater.handleAlarm(alarm);
+});
+
+browser.webNavigation.onCommitted.addListener(({ tabId, frameId, url }) => {
+  if (frameId !== 0) return;
+  if (blockLog.noteNavigation(tabId, url)) {
+    badge.updateBadge(tabId);
+  }
+});
+
+browser.tabs.onRemoved.addListener(tabId => {
+  blockLog.clearTab(tabId);
 });
 
 const handlers = {
@@ -124,6 +139,8 @@ const handlers = {
     geo.flushWebRequestCache();
     return { ok: true };
   },
+
+  'blocks.get': ({ tabId }) => ({ ok: true, entries: blockLog.getForTab(tabId) }),
 
   'tester.evaluate': async ({ websiteUrl, resourceUrl, resourceIp }) => {
     try {

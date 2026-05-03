@@ -251,25 +251,19 @@ input.num-fixed { width: 90px; }
 .data-row .meta.error { color: var(--danger); }
 
 .tester-output {
-  font: 12px/1.5 var(--font-mono);
-  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
-  padding: 10px;
-  border-radius: 6px;
   margin: 0;
   min-height: 2em;
-  border: 1px solid var(--border);
 }
 
 .tester-output:empty::before {
   content: 'No evaluation yet';
   color: var(--muted);
-}
-
-.tester-pre {
-  margin: 0;
-  font: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-size: 13px;
+  padding: 10px;
+  display: block;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  text-align: center;
 }
 
 dialog {

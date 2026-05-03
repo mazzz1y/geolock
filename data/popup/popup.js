@@ -1,0 +1,95 @@
+import { buildTraceView } from '../lib/trace-view.js';
+import { elem } from '../lib/dom.js';
+
+const send = message => browser.runtime.sendMessage(message);
+
+let activeTabId = null;
+let activeTabUrl = '';
+let currentEntries = [];
+
+async function init() {
+  browser.runtime.onMessage.addListener(message => {
+    if (message?.kind === 'event:blocks.changed' && message.tabId === activeTabId) {
+      render();
+    }
+  });
+  document.getElementById('open-settings').addEventListener('click', () => {
+    browser.runtime.openOptionsPage();
+  });
+  document.getElementById('save-trace').addEventListener('click', saveTrace);
+
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  activeTabId = tab?.id ?? null;
+  activeTabUrl = tab?.url ?? '';
+  await render();
+}
+
+async function render() {
+  if (activeTabId == null) return;
+  const reply = await send({ kind: 'blocks.get', tabId: activeTabId });
+  currentEntries = reply?.ok ? reply.entries : [];
+  document.getElementById('save-trace').disabled = currentEntries.length === 0;
+  const list = document.getElementById('blocks-list');
+  if (!currentEntries.length) {
+    list.replaceChildren();
+    return;
+  }
+  list.replaceChildren(...[...currentEntries].reverse().map(buildEntryNode));
+}
+
+function saveTrace() {
+  if (!currentEntries.length) return;
+  const now = new Date();
+  const payload = {
+    schema: 'geolock-trace-v1',
+    exportedAt: now.toISOString(),
+    page: activeTabUrl,
+    entries: currentEntries,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const stamp = now.toISOString().replace(/\..+$/, '').replace(/[:.]/g, '-');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `geolock-trace-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildEntryNode(entry) {
+  const details = elem('details', { class: 'block-entry' });
+
+  const resourceLine = entry.resourceUrl;
+  const ruleName = entry.matchedRule?.name
+    || (entry.matchedRule ? `#${entry.matchedRule.index + 1}` : '');
+
+  const summary = elem('summary', { title: resourceLine },
+    elem('span', { class: 'caret' }),
+    ruleName ? elem('span', { class: 'rule-tag' }, ruleName) : null,
+    elem('span', { class: 'entry-text' }, resourceLine),
+  );
+  details.appendChild(summary);
+
+  const body = elem('div', { class: 'block-detail' });
+
+  if (entry.trace?.length) {
+    body.appendChild(buildTraceView({
+      page: entry.websiteUrl || entry.websiteHost || '',
+      resource: entry.resourceUrl,
+      verdict: 'block',
+      matchedRule: entry.matchedRule,
+      trace: entry.trace,
+      contexts: entry.contexts,
+      mode: 'matched-only',
+    }));
+  } else {
+    body.appendChild(elem('div', { class: 'muted small' }, 'No trace available'));
+  }
+
+  details.appendChild(body);
+  return details;
+}
+
+init();

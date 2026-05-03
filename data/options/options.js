@@ -1,6 +1,8 @@
 import { normalizeMatcher, serializeMatcher, convertKind, KIND_LABELS, ALL_KINDS } from './matcher-tree.js';
 import { parseGeositeRef, formatGeositeRef } from '../../lib/geosite-ref.js';
 import { parseCidr } from '../../lib/ip.js';
+import { buildTraceView } from '../lib/trace-view.js';
+import { elem } from '../lib/dom.js';
 
 const $ = id => document.getElementById(id);
 const send = message => browser.runtime.sendMessage(message);
@@ -652,70 +654,17 @@ async function runTester() {
     output.replaceChildren(elem('span', { class: 'error' }, `Error: ${reply?.error ?? 'unknown'}`));
     return;
   }
-  output.replaceChildren(elem('pre', { class: 'tester-pre' }, formatTesterResult(reply.result)));
-}
-
-function formatTesterResult(result) {
-  const lines = [`Verdict: ${result.verdict.toUpperCase()}`];
-  lines.push(result.matchedRule
-    ? `Matched rule: #${result.matchedRule.index + 1}${result.matchedRule.name ? ` (${result.matchedRule.name})` : ''}${result.matchedRule.direction ? ` [${result.matchedRule.direction}]` : ''}`
-    : 'No rule matched; default action applied');
-  if (result.contexts) {
-    lines.push(`Website:  host=${result.contexts.website?.host ?? '?'} ips=${formatIps(result.contexts.website?.ips)}`);
-    lines.push(`Resource: host=${result.contexts.resource?.host ?? '?'} ips=${formatIps(result.contexts.resource?.ips)}`);
-  }
-  if (result.trace?.length) {
-    lines.push('Trace:');
-    for (const step of result.trace) {
-      const biTag = step.bidirectional ? ' bidirectional' : '';
-      lines.push(`  rule #${step.ruleIndex + 1} (${step.ruleName || '-'}) action=${step.action}${biTag} -> website=${formatHit(step.websiteHit)}, resource=${formatHit(step.resourceHit)}`);
-      if (step.websiteTrace) lines.push('    website matcher:', ...formatMatcherTrace(step.websiteTrace, 6));
-      if (step.resourceTrace) lines.push('    resource matcher:', ...formatMatcherTrace(step.resourceTrace, 6));
-      if (step.bidirectional && step.reverseWebsiteHit !== null) {
-        lines.push(`    reverse pass (swapped) -> website=${formatHit(step.reverseWebsiteHit)}, resource=${formatHit(step.reverseResourceHit)}`);
-        if (step.reverseWebsiteTrace) lines.push('      website matcher:', ...formatMatcherTrace(step.reverseWebsiteTrace, 8));
-        if (step.reverseResourceTrace) lines.push('      resource matcher:', ...formatMatcherTrace(step.reverseResourceTrace, 8));
-      }
-    }
-  }
-  return lines.join('\n');
-}
-
-function formatIps(ips) {
-  return Array.isArray(ips) && ips.length ? ips.join(', ') : 'unresolved';
-}
-
-function formatHit(value) {
-  if (value === undefined) return '—';
-  if (value === null) return 'n/a';
-  return value ? 'HIT' : 'miss';
-}
-
-function formatMatcherTrace(node, indent) {
-  if (!node) return [];
-  const pad = ' '.repeat(indent);
-  const lines = [`${pad}${describeTraceNode(node)}`];
-  const children = node.terms ?? (node.term ? [node.term] : []);
-  for (const child of children) {
-    if (child) lines.push(...formatMatcherTrace(child, indent + 2));
-  }
-  return lines;
-}
-
-function describeTraceNode(node) {
-  const verdict = node.hit === null ? '[?]' : node.hit ? '[+]' : '[-]';
-  const note = node.note ? ` (${node.note})` : '';
-  switch (node.kind) {
-    case 'any': return `${verdict} any`;
-    case 'geosite': return `${verdict} geosite:${node.tag || '?'}${node.attr ? '@' + node.attr : ''} host=${node.host || '?'}${note}`;
-    case 'geoip':   return `${verdict} geoip:${node.tag || '?'} ips=${formatIps(node.ips)}${note}`;
-    case 'domain':  return `${verdict} domain:/${node.regex}/ host=${node.host || '?'}${note}`;
-    case 'ip':      return `${verdict} ip:${node.cidr} ips=${formatIps(node.ips)}${note}`;
-    case 'all_of':  return `${verdict} AND${note}`;
-    case 'any_of':  return `${verdict} OR${note}`;
-    case 'not':     return `${verdict} NOT${note}`;
-    default:        return `${verdict} ${node.kind}${note}`;
-  }
+  const result = reply.result;
+  const view = buildTraceView({
+    page: websiteUrl || '',
+    resource: resourceUrl || '',
+    verdict: result.verdict,
+    matchedRule: result.matchedRule,
+    trace: result.trace ?? [],
+    contexts: result.contexts,
+    mode: 'full',
+  });
+  output.replaceChildren(view);
 }
 
 function exportConfig() {
@@ -813,23 +762,6 @@ function showCardBanner(cardId, text, kind = 'error', autoHideMs = 6000) {
       cardBannerTimers.delete(cardId);
     }, autoHideMs));
   }
-}
-
-function elem(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null || value === false) continue;
-    if (key === 'class') node.className = value;
-    else if (key === 'style') node.setAttribute('style', value);
-    else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
-    else if (key in node) node[key] = value;
-    else node.setAttribute(key, String(value));
-  }
-  for (const child of children) {
-    if (child == null) continue;
-    node.append(child.nodeType ? child : document.createTextNode(String(child)));
-  }
-  return node;
 }
 
 function button(label, onClick, props = {}) {

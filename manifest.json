@@ -28,6 +28,14 @@
     "scripts": ["worker.js"],
     "type": "module"
   },
+  "action": {
+    "default_title": "GeoLock",
+    "default_popup": "data/popup/index.html",
+    "default_icon": {
+      "48": "data/icons/icon-48.png",
+      "96": "data/icons/icon-96.png"
+    }
+  },
   "options_ui": {
     "page": "data/options/index.html",
     "open_in_tab": true

@@ -2,6 +2,8 @@ import { evaluate } from './rules-engine.js';
 import * as geo from './geo/index.js';
 import * as dnsCache from './dns-cache.js';
 import { parseIp } from '../lib/ip.js';
+import * as blockLog from './block-log.js';
+import * as badge from './badge.js';
 
 const tabFrames = new Map();
 const SELF_ORIGIN_PREFIX = (() => {
@@ -75,8 +77,32 @@ async function handleBeforeRequest(details) {
     frames: tabFrames,
     selfOriginPrefix: SELF_ORIGIN_PREFIX,
     whenReady: () => geo.whenReady(),
+    trace: true,
   });
-  return result?.verdict === 'block' ? { cancel: true } : undefined;
+  if (result?.verdict === 'block') {
+    const tabId = details.tabId;
+    blockLog.record(tabId, {
+      ts: Date.now(),
+      resourceUrl: details.url,
+      resourceHost: extractHost(details.url),
+      resourceType: details.type,
+      websiteHost: result.contexts?.website?.host ?? '',
+      websiteUrl: result.contexts?.website?.url ?? '',
+      matchedRule: result.matchedRule,
+      trace: result.trace,
+      contexts: result.contexts,
+    });
+    badge.updateBadge(tabId);
+    notifyBlocksChanged(tabId);
+    return { cancel: true };
+  }
+  return undefined;
+}
+
+function notifyBlocksChanged(tabId) {
+  try {
+    browser.runtime.sendMessage({ kind: 'event:blocks.changed', tabId }).catch(() => {});
+  } catch { /* no listeners */ }
 }
 
 export async function evaluateRequest(details, { config, geo, dnsLookup, frames, selfOriginPrefix, whenReady, trace = false }) {
