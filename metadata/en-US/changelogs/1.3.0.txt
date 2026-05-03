@@ -1,0 +1,4 @@
+- Fix popup width on Firefox Android
+- Fix geoip/geosite updates being skipped when browser is closed at the scheduled time
+- Fix transient fetch failures pushing the next update attempt by a full interval
+- Fix settings page sometimes showing empty data status

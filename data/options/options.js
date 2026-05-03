@@ -63,16 +63,13 @@ async function refreshData() {
   const reply = await send({ kind: 'data.status' });
   if (!reply?.ok) return;
   renderDataCard(reply.status, reply.errors, reply.updating);
-  renderRemoteTimestamps(reply.remoteLastCheckedAt, reply.remoteLastAppliedAt);
+  renderRemoteTimestamps(reply.remoteLastAppliedAt);
 }
 
-function renderRemoteTimestamps(checkedAt, appliedAt) {
+function renderRemoteTimestamps(appliedAt) {
   const node = $('remote-last-fetched');
   if (!node) return;
-  const parts = [];
-  if (checkedAt) parts.push(`Last checked ${new Date(checkedAt).toLocaleString()}`);
-  if (appliedAt && appliedAt !== checkedAt) parts.push(`last applied ${new Date(appliedAt).toLocaleString()}`);
-  node.textContent = parts.join('; ');
+  node.textContent = appliedAt ? `Last applied ${new Date(appliedAt).toLocaleString()}` : '';
 }
 
 function renderAll() {

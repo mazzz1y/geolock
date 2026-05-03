@@ -1,14 +1,11 @@
-import { saveBlob, loadBlobMeta, updateBlobMeta } from './geo/store.js';
+import { saveBlob, loadBlobMeta } from './geo/store.js';
 import * as geo from './geo/index.js';
 import { scanCatalog } from './geo/dat-reader.js';
 import { saveConfig, loadConfig, mergeWithDefaults, validateConfig, loadRemoteSettings } from './config.js';
 
 const DAT_KEY = { geoip: 'geoip.dat', geosite: 'geosite.dat' };
-const ALARMS = {
-  geoip: 'geolock-update-geoip',
-  geosite: 'geolock-update-geosite',
-  remote: 'geolock-update-remote',
-};
+const HEARTBEAT_ALARM = 'geolock-update-heartbeat';
+const HEARTBEAT_PERIOD_MINUTES = 60;
 
 const lastError = { geoip: null, geosite: null, remote: null };
 const inFlight = { geoip: null, geosite: null, remote: null };
@@ -46,13 +43,19 @@ async function runUpdateDat(kind) {
 
   notifyDataChanged();
   try {
-    const bytes = await downloadAndVerify(kind, key, source);
+    const bytes = await downloadAndVerify(kind, source);
     const bodyHash = await sha256Hex(bytes);
     const now = Date.now();
     const previousMeta = await loadBlobMeta(key);
 
     if (previousMeta?.bodyHash === bodyHash) {
-      await updateBlobMeta(key, { lastCheckedAt: now, sourceUrl: source.url, shaVerified: !!source.sha256_url });
+      await saveBlob(key, bytes, {
+        ...previousMeta,
+        sourceUrl: source.url,
+        shaVerified: !!source.sha256_url,
+        bodyHash,
+        savedAt: now,
+      });
       lastError[kind] = null;
       return { unchanged: true, byteLength: bytes.length };
     }
@@ -60,7 +63,7 @@ async function runUpdateDat(kind) {
     try {
       scanCatalog(bytes);
     } catch (error) {
-      throw await fail(kind, key, `${kind}: parse failed (${error.message ?? error})`);
+      throw fail(kind, `${kind}: parse failed (${error.message ?? error})`);
     }
 
     await saveBlob(key, bytes, {
@@ -68,10 +71,9 @@ async function runUpdateDat(kind) {
       shaVerified: !!source.sha256_url,
       bodyHash,
       savedAt: now,
-      lastCheckedAt: now,
     });
     if (!await geo.reload(kind)) {
-      throw await fail(kind, key, `${kind}: reload after save returned no index`);
+      throw fail(kind, `${kind}: reload after save returned no index`);
     }
     lastError[kind] = null;
     return { unchanged: false, byteLength: bytes.length };
@@ -80,33 +82,32 @@ async function runUpdateDat(kind) {
   }
 }
 
-async function downloadAndVerify(kind, key, source) {
+async function downloadAndVerify(kind, source) {
   let response;
   try {
     response = await fetch(source.url, { credentials: 'omit' });
   } catch (error) {
     lastError[kind] = String(error?.message ?? error);
-    await markChecked(key);
     throw error;
   }
   if (!response.ok) {
-    throw await fail(kind, key, `${kind} download failed: ${response.status}`);
+    throw fail(kind, `${kind} download failed: ${response.status}`);
   }
   const buffer = await response.arrayBuffer();
   if (buffer.byteLength < 32) {
-    throw await fail(kind, key, `${kind}: file suspiciously small`);
+    throw fail(kind, `${kind}: file suspiciously small`);
   }
   const bytes = new Uint8Array(buffer);
 
   const shaUrl = (source.sha256_url ?? '').trim();
   if (shaUrl) {
-    const expected = await fetchSha256(shaUrl).catch(error => {
-      throw fail(kind, key, `${kind}: sha256 fetch failed (${error.message ?? error})`);
-    });
-    if (!expected) throw await fail(kind, key, `${kind}: sha256 file did not contain a valid hash`);
+    let expected;
+    try { expected = await fetchSha256(shaUrl); }
+    catch (error) { throw fail(kind, `${kind}: sha256 fetch failed (${error.message ?? error})`); }
+    if (!expected) throw fail(kind, `${kind}: sha256 file did not contain a valid hash`);
     const actual = await sha256Hex(bytes);
     if (actual !== expected) {
-      throw await fail(kind, key, `${kind}: sha256 mismatch (expected ${expected}, got ${actual})`);
+      throw fail(kind, `${kind}: sha256 mismatch (expected ${expected}, got ${actual})`);
     }
   }
   return bytes;
@@ -118,18 +119,9 @@ async function fetchSha256(url) {
   return parseSha256Sum(await response.text());
 }
 
-async function fail(kind, key, message) {
+function fail(kind, message) {
   lastError[kind] = message;
-  await markChecked(key);
   return new Error(message);
-}
-
-async function markChecked(key) {
-  try {
-    if (await loadBlobMeta(key)) {
-      await updateBlobMeta(key, { lastCheckedAt: Date.now() });
-    }
-  } catch { /* best-effort */ }
 }
 
 function notifyDataChanged() {
@@ -156,29 +148,23 @@ async function runUpdateRemoteConfig() {
   if (!remote?.url) throw new Error('remote config url not set');
 
   notifyDataChanged();
-  const now = Date.now();
-  const stamp = () => browser.storage.local.set({ remote_last_checked_at: now });
   try {
-    let response;
-    try { response = await fetch(remote.url, { credentials: 'omit' }); }
-    catch (error) { await stamp(); throw error; }
-
-    if (!response.ok) { await stamp(); throw new Error(`remote config fetch failed: ${response.status}`); }
+    const response = await fetch(remote.url, { credentials: 'omit' });
+    if (!response.ok) throw new Error(`remote config fetch failed: ${response.status}`);
 
     let parsed;
     try { parsed = JSON.parse(await response.text()); }
-    catch { await stamp(); throw new Error('remote config is not valid JSON'); }
+    catch { throw new Error('remote config is not valid JSON'); }
 
     const merged = mergeWithDefaults(parsed);
     const validation = validateConfig(merged);
     if (!validation.ok) {
-      await stamp();
       throw new Error('remote config invalid: ' + validation.errors.map(e => `${e.path}: ${e.message}`).join('; '));
     }
     merged.data_sources = mergeDataSources(config.data_sources, merged.data_sources);
 
     await saveConfig(merged);
-    await browser.storage.local.set({ remote_last_checked_at: now, remote_last_applied_at: now });
+    await browser.storage.local.set({ remote_last_applied_at: Date.now() });
     lastError.remote = null;
     return { applied: true };
   } catch (error) {
@@ -213,7 +199,7 @@ export async function updateIfStale(kind) {
     const source = config.data_sources?.[kind];
     if (!shouldAutoUpdate(source)) return { skipped: 'disabled' };
     const meta = await loadBlobMeta(DAT_KEY[kind]);
-    if (meta?.savedAt && !isStale({ lastCheckedAt: meta.lastCheckedAt, intervalHours: source.interval_hours })) {
+    if (meta?.savedAt && !isStale({ lastCheckedAt: meta.savedAt, intervalHours: source.interval_hours })) {
       return { skipped: 'fresh' };
     }
     return updateDat(kind);
@@ -221,8 +207,8 @@ export async function updateIfStale(kind) {
   if (kind === 'remote') {
     const remote = await loadRemoteSettings();
     if (!shouldAutoUpdate(remote)) return { skipped: 'disabled' };
-    const stored = await browser.storage.local.get(['remote_last_checked_at', 'remote_last_applied_at']);
-    if (stored?.remote_last_applied_at && !isStale({ lastCheckedAt: stored.remote_last_checked_at, intervalHours: remote.interval_hours })) {
+    const stored = await browser.storage.local.get(['remote_last_applied_at']);
+    if (!isStale({ lastCheckedAt: stored?.remote_last_applied_at, intervalHours: remote.interval_hours })) {
       return { skipped: 'fresh' };
     }
     return updateRemoteConfig();
@@ -230,28 +216,20 @@ export async function updateIfStale(kind) {
   throw new Error(`unknown update kind: ${kind}`);
 }
 
-export async function rescheduleAlarms() {
-  const config = await loadConfig();
-  const sources = {
-    geoip: config.data_sources?.geoip,
-    geosite: config.data_sources?.geosite,
-    remote: await loadRemoteSettings(),
-  };
-  for (const [kind, source] of Object.entries(sources)) {
-    await browser.alarms.clear(ALARMS[kind]);
-    if (shouldAutoUpdate(source)) {
-      browser.alarms.create(ALARMS[kind], {
-        periodInMinutes: Math.max(60, (source.interval_hours ?? 24) * 60),
-      });
-    }
-  }
+export async function ensureHeartbeatAlarm() {
+  const existing = await browser.alarms.get(HEARTBEAT_ALARM);
+  if (existing && existing.periodInMinutes === HEARTBEAT_PERIOD_MINUTES) return;
+  await browser.alarms.clear(HEARTBEAT_ALARM);
+  browser.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES });
 }
 
 export function handleAlarm(alarm) {
-  if (alarm.name === ALARMS.geoip)   return updateDat('geoip').catch(() => {});
-  if (alarm.name === ALARMS.geosite) return updateDat('geosite').catch(() => {});
-  if (alarm.name === ALARMS.remote)  return updateRemoteConfig().catch(() => {});
-  return Promise.resolve();
+  if (alarm?.name !== HEARTBEAT_ALARM) return Promise.resolve();
+  return Promise.allSettled([
+    updateIfStale('geoip'),
+    updateIfStale('geosite'),
+    updateIfStale('remote'),
+  ]);
 }
 
 export function getLastError(kind) {

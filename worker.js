@@ -23,7 +23,7 @@ async function bootstrap() {
   badge.resetAllTabs().catch(() => {});
   try { await geo.reloadAll(); }
   catch (error) { console.error('GeoLock geo reload failed:', error); }
-  try { await updater.rescheduleAlarms(); }
+  try { await updater.ensureHeartbeatAlarm(); }
   catch (error) { console.error('GeoLock alarm scheduling failed:', error); }
   updater.updateIfStale('geoip').catch(() => {});
   updater.updateIfStale('geosite').catch(() => {});
@@ -38,7 +38,6 @@ browser.storage.onChanged.addListener((changes, area) => {
     applyDnsConfig(next.dns);
     geo.flushWebRequestCache();
   }
-  updater.rescheduleAlarms().catch(() => {});
 });
 
 browser.alarms.onAlarm.addListener(alarm => {
@@ -69,7 +68,6 @@ const handlers = {
     enforcer.setConfig(saved);
     applyDnsConfig(saved.dns);
     geo.flushWebRequestCache();
-    await updater.rescheduleAlarms();
     return { ok: true, config: saved };
   },
 
@@ -79,7 +77,6 @@ const handlers = {
     enforcer.setConfig(fresh);
     applyDnsConfig(fresh.dns);
     geo.flushWebRequestCache();
-    await updater.rescheduleAlarms();
     return { ok: true, config: fresh };
   },
 
@@ -95,7 +92,6 @@ const handlers = {
     const validation = validateRemoteSettings(merged);
     if (!validation.ok) return { ok: false, errors: validation.errors };
     const saved = await saveRemoteSettings(merged);
-    await updater.rescheduleAlarms();
     return { ok: true, settings: saved };
   },
 
@@ -119,7 +115,8 @@ const handlers = {
   },
 
   'data.status': async () => {
-    const stored = await browser.storage.local.get(['remote_last_checked_at', 'remote_last_applied_at']);
+    await geo.whenReady();
+    const stored = await browser.storage.local.get(['remote_last_applied_at']);
     return {
       ok: true,
       status: geo.status(),
@@ -129,7 +126,6 @@ const handlers = {
         remote: updater.getLastError('remote'),
       },
       updating: updater.getProgress(),
-      remoteLastCheckedAt: stored?.remote_last_checked_at ?? null,
       remoteLastAppliedAt: stored?.remote_last_applied_at ?? null,
     };
   },

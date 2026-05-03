@@ -71,7 +71,6 @@ function createStore({ name, buildTagTrie }) {
     return {
       kind: name,
       savedAt: state.blobMeta?.savedAt ?? null,
-      lastCheckedAt: state.blobMeta?.lastCheckedAt ?? null,
       sourceUrl: state.blobMeta?.sourceUrl ?? null,
       shaVerified: !!state.blobMeta?.shaVerified,
       builtAt: state.builtAt,

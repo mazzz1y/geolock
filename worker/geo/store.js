@@ -53,9 +53,4 @@ export async function loadBlobMeta(key) {
   return meta;
 }
 
-export async function updateBlobMeta(key, partial) {
-  const existing = await loadBlobMeta(key);
-  return withStore('readwrite', store => {
-    store.put({ key: metaKey(key), ...(existing ?? {}), ...partial });
-  });
-}
+

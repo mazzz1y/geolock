@@ -1,1 +1,0 @@
-- Fix popup width on Firefox Android
