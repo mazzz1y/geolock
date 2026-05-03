@@ -1,0 +1,3 @@
+- Fix Settings button on Android opening the options page hidden behind the popup
+- Fix popup scroll on Android with expanded entries
+- Fetch geoip/geosite immediately when a data source URL is added or changed
