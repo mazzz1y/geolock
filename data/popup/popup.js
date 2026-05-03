@@ -15,6 +15,7 @@ async function init() {
   });
   document.getElementById('open-settings').addEventListener('click', () => {
     browser.runtime.openOptionsPage();
+    window.close();
   });
   document.getElementById('save-trace').addEventListener('click', saveTrace);
 
