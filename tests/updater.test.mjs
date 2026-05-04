@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { isStale, shouldAutoUpdate, parseSha256Sum, mergeDataSources } from '../worker/updater.js';
+import { isStale, shouldAutoUpdate, parseSha256Sum, mergeDataSources, fetchWithTimeout } from '../worker/updater.js';
 
 const HOUR = 3600 * 1000;
 
@@ -101,6 +101,37 @@ export const tests = [
       const merged = mergeDataSources(current, { geoip: { url: 'a2' } });
       assert.equal(merged.geoip.url, 'a2');
       assert.equal(merged.geosite.url, 'b');
+    },
+  },
+  {
+    name: 'fetchWithTimeout: aborts when fetch never resolves',
+    run: async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+      try {
+        await assert.rejects(
+          () => fetchWithTimeout('https://hangs.example/', { timeoutMs: 5 }),
+          err => err?.name === 'AbortError',
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  },
+  {
+    name: 'fetchWithTimeout: returns response when fetch resolves quickly',
+    run: async () => {
+      const originalFetch = globalThis.fetch;
+      const stubResponse = { ok: true, status: 200 };
+      globalThis.fetch = async () => stubResponse;
+      try {
+        const response = await fetchWithTimeout('https://fast.example/');
+        assert.equal(response, stubResponse);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     },
   },
 ];

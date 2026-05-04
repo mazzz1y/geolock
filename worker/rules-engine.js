@@ -1,58 +1,60 @@
 import { matches, andK, orK, traceValue } from './matchers.js';
 import { ipToString } from '../lib/ip.js';
+import { desugarRule } from './rule-shape.js';
 
 export async function evaluate(config, contexts, geo, deps = {}, { trace: collectTrace = false } = {}) {
   const trace = collectTrace ? [] : null;
   const rules = Array.isArray(config?.rules) ? config.rules : [];
-  let resolveWebsite = deps.resolveWebsite ?? null;
-  let resolveResource = deps.resolveResource ?? null;
+  let resolveSource = deps.resolveSource ?? null;
+  let resolveDestination = deps.resolveDestination ?? null;
 
   for (let index = 0; index < rules.length; index++) {
-    const rule = rules[index];
-    if (!rule || rule.enabled === false) continue;
+    const raw = rules[index];
+    if (!raw || raw.enabled === false) continue;
+    const rule = desugarRule(raw);
 
     const isBi = rule.bidirectional === true;
-    const websiteNeedsIp = matcherNeedsIp(rule.website) || (isBi && matcherNeedsIp(rule.resource));
-    const resourceNeedsIp = matcherNeedsIp(rule.resource) || (isBi && matcherNeedsIp(rule.website));
+    const sourceNeedsIp = matcherNeedsIp(rule.source) || (isBi && matcherNeedsIp(rule.destination));
+    const destinationNeedsIp = matcherNeedsIp(rule.destination) || (isBi && matcherNeedsIp(rule.source));
 
-    if (resolveWebsite && websiteNeedsIp) {
-      await resolveWebsite(contexts.website);
-      resolveWebsite = null;
+    if (resolveSource && sourceNeedsIp) {
+      await resolveSource(contexts.source);
+      resolveSource = null;
     }
-    if (resolveResource && resourceNeedsIp) {
-      await resolveResource(contexts.resource);
-      resolveResource = null;
-    }
-
-    const websiteSubtrace = trace ? [] : null;
-    const websiteHit = matches(rule.website, contexts.website, geo, websiteSubtrace);
-
-    if (websiteHit === true && resolveResource && matcherNeedsIp(rule.resource)) {
-      await resolveResource(contexts.resource);
-      resolveResource = null;
+    if (resolveDestination && destinationNeedsIp) {
+      await resolveDestination(contexts.destination);
+      resolveDestination = null;
     }
 
-    const resourceSubtrace = trace && websiteHit === true ? [] : null;
-    const resourceHit = websiteHit === true ? matches(rule.resource, contexts.resource, geo, resourceSubtrace) : websiteHit;
+    const sourceSubtrace = trace ? [] : null;
+    const sourceHit = matches(rule.source, contexts.source, geo, sourceSubtrace);
 
-    const forward = andK(websiteHit, resourceHit);
+    if (sourceHit === true && resolveDestination && matcherNeedsIp(rule.destination)) {
+      await resolveDestination(contexts.destination);
+      resolveDestination = null;
+    }
+
+    const destinationSubtrace = trace && sourceHit === true ? [] : null;
+    const destinationHit = sourceHit === true ? matches(rule.destination, contexts.destination, geo, destinationSubtrace) : sourceHit;
+
+    const forward = andK(sourceHit, destinationHit);
     let direction = forward === true ? (isBi ? 'forward' : null) : null;
 
-    let reverseWebsiteHit = null;
-    let reverseResourceHit = null;
-    let reverseWebsiteTrace = null;
-    let reverseResourceTrace = null;
+    let reverseSourceHit = null;
+    let reverseDestinationHit = null;
+    let reverseSourceTrace = null;
+    let reverseDestinationTrace = null;
     let reverse = false;
     if (forward !== true && isBi) {
-      const revWebsiteSub = trace ? [] : null;
-      const revResourceSub = trace ? [] : null;
-      reverseWebsiteHit = matches(rule.resource, contexts.website, geo, revWebsiteSub);
-      reverseResourceHit = reverseWebsiteHit === true
-        ? matches(rule.website, contexts.resource, geo, revResourceSub)
-        : reverseWebsiteHit;
-      reverseWebsiteTrace = revWebsiteSub?.[0] ?? null;
-      reverseResourceTrace = reverseWebsiteHit === true ? (revResourceSub?.[0] ?? null) : null;
-      reverse = andK(reverseWebsiteHit, reverseResourceHit);
+      const revSourceSub = trace ? [] : null;
+      const revDestinationSub = trace ? [] : null;
+      reverseSourceHit = matches(rule.destination, contexts.source, geo, revSourceSub);
+      reverseDestinationHit = reverseSourceHit === true
+        ? matches(rule.source, contexts.destination, geo, revDestinationSub)
+        : reverseSourceHit;
+      reverseSourceTrace = revSourceSub?.[0] ?? null;
+      reverseDestinationTrace = reverseSourceHit === true ? (revDestinationSub?.[0] ?? null) : null;
+      reverse = andK(reverseSourceHit, reverseDestinationHit);
       if (reverse === true) direction = 'reverse';
     }
 
@@ -63,14 +65,14 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
       ruleName: rule.name ?? '',
       action: rule.action,
       bidirectional: isBi,
-      websiteHit: traceValue(websiteHit),
-      resourceHit: websiteHit === true ? traceValue(resourceHit) : null,
-      websiteTrace: websiteSubtrace?.[0] ?? null,
-      resourceTrace: resourceSubtrace?.[0] ?? null,
-      reverseWebsiteHit: isBi ? traceValue(reverseWebsiteHit) : null,
-      reverseResourceHit: isBi ? (reverseWebsiteHit === true ? traceValue(reverseResourceHit) : null) : null,
-      reverseWebsiteTrace,
-      reverseResourceTrace,
+      sourceHit: traceValue(sourceHit),
+      destinationHit: sourceHit === true ? traceValue(destinationHit) : null,
+      sourceTrace: sourceSubtrace?.[0] ?? null,
+      destinationTrace: destinationSubtrace?.[0] ?? null,
+      reverseSourceHit: isBi ? traceValue(reverseSourceHit) : null,
+      reverseDestinationHit: isBi ? (reverseSourceHit === true ? traceValue(reverseDestinationHit) : null) : null,
+      reverseSourceTrace,
+      reverseDestinationTrace,
       direction,
     });
 
@@ -96,18 +98,18 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
 
 function matcherNeedsIp(m) {
   if (!m || typeof m !== 'object') return false;
-  if (m.kind === 'geoip' || m.kind === 'ip') return true;
-  if (m.kind === 'all_of' || m.kind === 'any_of') {
-    return Array.isArray(m.terms) && m.terms.some(matcherNeedsIp);
+  if (m.type === 'geoip' || m.type === 'ip') return true;
+  if (m.type === 'and' || m.type === 'or') {
+    return Array.isArray(m.matches) && m.matches.some(matcherNeedsIp);
   }
-  if (m.kind === 'not') return matcherNeedsIp(m.term);
+  if (m.type === 'not') return matcherNeedsIp(m.match);
   return false;
 }
 
 function summarizeContexts(contexts) {
   return {
-    website: summarizeContext(contexts?.website),
-    resource: summarizeContext(contexts?.resource),
+    source: summarizeContext(contexts?.source),
+    destination: summarizeContext(contexts?.destination),
   };
 }
 

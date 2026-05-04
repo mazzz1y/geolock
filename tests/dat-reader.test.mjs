@@ -68,10 +68,10 @@ export const tests = [
       const bytes = await loadGeositeBytes();
       const catalog = scanCatalog(bytes);
       const google = buildGeositeTagTrie(sliceFor(bytes, catalog, 'google'));
-      assert.equal(google.trie.lookup('foo.google.com').size > 0, true);
-      assert.equal(google.trie.lookup('mail.google.com').size > 0, true);
-      assert.equal(google.trie.lookup('foo.mail.google.com').size > 0, true);
-      assert.equal(google.trie.lookup('notgoogle.com').size, 0);
+      assert.equal(google.trie.lookup('foo.search.example').size > 0, true);
+      assert.equal(google.trie.lookup('mail.search.example').size > 0, true);
+      assert.equal(google.trie.lookup('foo.mail.search.example').size > 0, true);
+      assert.equal(google.trie.lookup('notsearch.example').size, 0);
     },
   },
   {
@@ -80,7 +80,7 @@ export const tests = [
       const bytes = await loadGeositeBytes();
       const catalog = scanCatalog(bytes);
       const cn = buildGeositeTagTrie(sliceFor(bytes, catalog, 'cn'));
-      assert.equal(cn.trie.lookup('foo.qq.com').size > 0, true);
+      assert.equal(cn.trie.lookup('foo.chat.example').size > 0, true);
     },
   },
   {
@@ -89,7 +89,7 @@ export const tests = [
       const bytes = await loadGeositeBytes();
       const catalog = scanCatalog(bytes);
       const google = buildGeositeTagTrie(sliceFor(bytes, catalog, 'google'));
-      assert.equal(google.trie.lookup('cdn.gstatic.com').size > 0, true);
+      assert.equal(google.trie.lookup('cdn.static.example').size > 0, true);
     },
   },
   {
@@ -98,15 +98,15 @@ export const tests = [
       const bytes = await loadGeositeBytes();
       const catalog = scanCatalog(bytes);
       const google = buildGeositeTagTrie(sliceFor(bytes, catalog, 'google'));
-      const youtubeHits = google.trie.lookup('youtube.com');
+      const mediaHits = google.trie.lookup('media.example');
       let hasAds = false;
-      for (const id of youtubeHits) {
+      for (const id of mediaHits) {
         if (Array.isArray(google.attrs[id]) && google.attrs[id].includes('ads')) hasAds = true;
       }
       assert.equal(hasAds, true);
-      const googleHits = google.trie.lookup('google.com');
+      const searchHits = google.trie.lookup('search.example');
       let plainHasAds = false;
-      for (const id of googleHits) {
+      for (const id of searchHits) {
         if (Array.isArray(google.attrs[id]) && google.attrs[id].includes('ads')) plainHasAds = true;
       }
       assert.equal(plainHasAds, false);

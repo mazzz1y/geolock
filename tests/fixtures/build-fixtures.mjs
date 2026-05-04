@@ -78,17 +78,17 @@ const geosite = buildGeosite([
   {
     country: 'GOOGLE',
     domains: [
-      { type: 2, value: 'google.com' },
-      { type: 2, value: 'youtube.com', attrs: ['ads'] },
-      { type: 3, value: 'mail.google.com' },
-      { type: 1, value: '^.*\\.gstatic\\.com$' },
+      { type: 2, value: 'search.example' },
+      { type: 2, value: 'media.example', attrs: ['ads'] },
+      { type: 3, value: 'mail.search.example' },
+      { type: 1, value: '^.*\\.static\\.example$' },
     ],
   },
   {
     country: 'CN',
     domains: [
-      { type: 2, value: 'baidu.com' },
-      { type: 0, value: 'qq' },
+      { type: 2, value: 'shop.example' },
+      { type: 0, value: 'chat' },
     ],
   },
 ]);

@@ -27,7 +27,15 @@ globalThis.browser = {
 const blockLog = await import('../worker/block-log.js');
 
 function makeEntry(n = 0) {
-  return { ts: Date.now() + n, resourceUrl: `https://example.com/${n}`, resourceHost: 'example.com', resourceType: 'image' };
+  return {
+    ts: Date.now() + n,
+    destinationUrl: `https://example.com/${n}`,
+    destinationHost: 'example.com',
+    destinationType: 'image',
+    sourceHost: '',
+    sourceUrl: '',
+    effect: 'block',
+  };
 }
 
 function resetAll() {
@@ -111,11 +119,11 @@ export const tests = [
     name: 'cap keeps newest entries',
     run: () => {
       blockLog.clearTab(5);
-      for (let i = 0; i < 105; i++) blockLog.record(5, { ...makeEntry(i), resourceUrl: `https://example.com/${i}` });
+      for (let i = 0; i < 105; i++) blockLog.record(5, { ...makeEntry(i), destinationUrl: `https://example.com/${i}` });
       const entries = blockLog.getForTab(5);
       assert.equal(entries.length, 100);
-      assert.equal(entries[0].resourceUrl, 'https://example.com/5');
-      assert.equal(entries[99].resourceUrl, 'https://example.com/104');
+      assert.equal(entries[0].destinationUrl, 'https://example.com/5');
+      assert.equal(entries[99].destinationUrl, 'https://example.com/104');
       blockLog.clearTab(5);
     },
   },
@@ -182,7 +190,7 @@ export const tests = [
     name: 'restore: rehydrates entries for active tabs',
     run: async () => {
       resetAll();
-      sessionStore.set('block_log_v1', {
+      sessionStore.set('block_log_v2', {
         log: { 30: [makeEntry(1), makeEntry(2)], 31: [makeEntry(3)] },
         lastUrl: { 30: 'https://example.com/a', 31: 'https://example.com/b' },
       });
@@ -197,7 +205,7 @@ export const tests = [
     name: 'restore: drops entries for closed tabs',
     run: async () => {
       resetAll();
-      sessionStore.set('block_log_v1', {
+      sessionStore.set('block_log_v2', {
         log: { 40: [makeEntry()], 41: [makeEntry()] },
         lastUrl: { 40: 'https://example.com/', 41: 'https://example.com/' },
       });
@@ -218,7 +226,7 @@ export const tests = [
       assert.equal(setCalls, 0, 'storage.set runs in microtask, not synchronously');
       await flush;
       assert.equal(setCalls, 1);
-      const stored = sessionStore.get('block_log_v1');
+      const stored = sessionStore.get('block_log_v2');
       assert.equal(stored.log['50'].length, 1);
       await blockLog.clearTab(50);
     },
@@ -236,7 +244,7 @@ export const tests = [
       assert.strictEqual(f2, f3);
       await f1;
       assert.equal(setCalls, 1);
-      const stored = sessionStore.get('block_log_v1');
+      const stored = sessionStore.get('block_log_v2');
       assert.equal(stored.log['51'].length, 3);
       await blockLog.clearTab(51);
     },
@@ -251,7 +259,7 @@ export const tests = [
       try {
         const flush = blockLog.record(52, makeEntry());
         await flush;
-        const stored = sessionStore.get('block_log_v1');
+        const stored = sessionStore.get('block_log_v2');
         assert.equal(stored.log['52'].length, 1);
       } finally {
         globalThis.setTimeout = realSetTimeout;
@@ -270,7 +278,7 @@ export const tests = [
       assert.ok(flush && typeof flush.then === 'function');
       await flush;
       assert.equal(setCalls, 1);
-      const stored = sessionStore.get('block_log_v1');
+      const stored = sessionStore.get('block_log_v2');
       assert.equal(stored.log['60'], undefined);
     },
   },
@@ -278,7 +286,7 @@ export const tests = [
     name: 'restore: corrupt payload starts clean without throwing',
     run: async () => {
       resetAll();
-      sessionStore.set('block_log_v1', { log: 'not-an-object', lastUrl: null });
+      sessionStore.set('block_log_v2', { log: 'not-an-object', lastUrl: null });
       await blockLog.restore(new Set([70]));
       assert.equal(blockLog.count(70), 0);
     },
@@ -298,15 +306,17 @@ export const tests = [
       blockLog.noteNavigation(90, 'https://source.example/page');
       blockLog.record(90, {
         ts: Date.now(),
-        resourceUrl: 'https://dest.example/landing',
-        resourceHost: 'dest.example',
-        resourceType: 'main_frame',
+        destinationUrl: 'https://dest.example/landing',
+        destinationHost: 'dest.example',
+        destinationType: 'main_frame',
+        sourceHost: 'source.example',
+        sourceUrl: 'https://source.example/page',
         effect: 'referrer-stripped',
       });
       const result = blockLog.noteNavigation(90, 'https://dest.example/landing');
       assert.equal(result.cleared, true);
       assert.equal(blockLog.count(90), 1);
-      assert.equal(blockLog.getForTab(90)[0].resourceHost, 'dest.example');
+      assert.equal(blockLog.getForTab(90)[0].destinationHost, 'dest.example');
       blockLog.clearTab(90);
     },
   },
@@ -315,13 +325,13 @@ export const tests = [
     run: () => {
       blockLog.clearTab(91);
       blockLog.noteNavigation(91, 'https://source.example/page');
-      blockLog.record(91, { ts: 1, resourceUrl: 'https://ads.example/img.png', resourceHost: 'ads.example', resourceType: 'image', effect: 'block' });
-      blockLog.record(91, { ts: 2, resourceUrl: 'https://tracker.example/p', resourceHost: 'tracker.example', resourceType: 'xmlhttprequest', effect: 'block' });
-      blockLog.record(91, { ts: 3, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.record(91, { ts: 1, destinationUrl: 'https://ads.example/img.png', destinationHost: 'ads.example', destinationType: 'image', sourceHost: '', sourceUrl: '', effect: 'block' });
+      blockLog.record(91, { ts: 2, destinationUrl: 'https://tracker.example/p', destinationHost: 'tracker.example', destinationType: 'xmlhttprequest', sourceHost: '', sourceUrl: '', effect: 'block' });
+      blockLog.record(91, { ts: 3, destinationUrl: 'https://dest.example/landing', destinationHost: 'dest.example', destinationType: 'main_frame', sourceHost: 'source.example', sourceUrl: 'https://source.example/page', effect: 'referrer-stripped' });
       blockLog.noteNavigation(91, 'https://dest.example/landing');
       assert.equal(blockLog.count(91), 1);
-      assert.equal(blockLog.getForTab(91)[0].resourceType, 'main_frame');
-      assert.equal(blockLog.getForTab(91)[0].resourceHost, 'dest.example');
+      assert.equal(blockLog.getForTab(91)[0].destinationType, 'main_frame');
+      assert.equal(blockLog.getForTab(91)[0].destinationHost, 'dest.example');
       blockLog.clearTab(91);
     },
   },
@@ -330,7 +340,7 @@ export const tests = [
     run: () => {
       blockLog.clearTab(92);
       blockLog.noteNavigation(92, 'https://source.example/page1');
-      blockLog.record(92, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.record(92, { ts: 1, destinationUrl: 'https://dest.example/landing', destinationHost: 'dest.example', destinationType: 'main_frame', sourceHost: 'source.example', sourceUrl: 'https://source.example/page', effect: 'referrer-stripped' });
       blockLog.noteNavigation(92, 'https://other.example/page');
       assert.equal(blockLog.count(92), 0);
       blockLog.clearTab(92);
@@ -340,7 +350,7 @@ export const tests = [
     name: 'noteNavigation: stripped entry consumed after first commit, dropped on second',
     run: () => {
       blockLog.clearTab(93);
-      blockLog.record(93, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.record(93, { ts: 1, destinationUrl: 'https://dest.example/landing', destinationHost: 'dest.example', destinationType: 'main_frame', sourceHost: 'source.example', sourceUrl: 'https://source.example/page', effect: 'referrer-stripped' });
       blockLog.noteNavigation(93, 'https://dest.example/landing');
       assert.equal(blockLog.count(93), 1);
       blockLog.noteNavigation(93, 'https://dest.example/other');
@@ -351,7 +361,7 @@ export const tests = [
     name: 'noteNavigation: reload of stripped destination drops the entry',
     run: () => {
       blockLog.clearTab(94);
-      blockLog.record(94, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.record(94, { ts: 1, destinationUrl: 'https://dest.example/landing', destinationHost: 'dest.example', destinationType: 'main_frame', sourceHost: 'source.example', sourceUrl: 'https://source.example/page', effect: 'referrer-stripped' });
       blockLog.noteNavigation(94, 'https://dest.example/landing');
       blockLog.noteNavigation(94, 'https://dest.example/landing');
       assert.equal(blockLog.count(94), 0);
@@ -361,12 +371,42 @@ export const tests = [
     name: 'getForTab strips _consumed flag from output',
     run: () => {
       blockLog.clearTab(95);
-      blockLog.record(95, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.record(95, { ts: 1, destinationUrl: 'https://dest.example/landing', destinationHost: 'dest.example', destinationType: 'main_frame', sourceHost: 'source.example', sourceUrl: 'https://source.example/page', effect: 'referrer-stripped' });
       blockLog.noteNavigation(95, 'https://dest.example/landing');
       const entries = blockLog.getForTab(95);
       assert.equal(entries.length, 1);
       assert.equal('_consumed' in entries[0], false);
       blockLog.clearTab(95);
+    },
+  },
+  {
+    name: 'dropMainFrameForUrl: removes matching main_frame entries',
+    run: () => {
+      blockLog.clearTab(96);
+      blockLog.record(96, { ts: 1, destinationUrl: 'https://dest.example/x', destinationHost: 'dest.example', destinationType: 'main_frame', sourceHost: '', sourceUrl: '', effect: 'referrer-stripped' });
+      blockLog.record(96, { ts: 2, destinationUrl: 'https://other.example/y', destinationHost: 'other.example', destinationType: 'image', sourceHost: '', sourceUrl: '', effect: 'block' });
+      blockLog.dropMainFrameForUrl(96, 'https://dest.example/x');
+      const entries = blockLog.getForTab(96);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].destinationType, 'image');
+      blockLog.clearTab(96);
+    },
+  },
+  {
+    name: 'dropMainFrameForUrl: returns null and no-op when nothing matches',
+    run: () => {
+      blockLog.clearTab(97);
+      blockLog.record(97, { ts: 1, destinationUrl: 'https://dest.example/x', destinationHost: 'dest.example', destinationType: 'image', sourceHost: '', sourceUrl: '', effect: 'block' });
+      const result = blockLog.dropMainFrameForUrl(97, 'https://nope.example/');
+      assert.equal(result, null);
+      assert.equal(blockLog.count(97), 1);
+      blockLog.clearTab(97);
+    },
+  },
+  {
+    name: 'dropMainFrameForUrl: tabId<0 is a no-op',
+    run: () => {
+      assert.equal(blockLog.dropMainFrameForUrl(-1, 'https://x/'), null);
     },
   },
   {

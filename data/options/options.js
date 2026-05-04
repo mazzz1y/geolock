@@ -1,6 +1,6 @@
-import { normalizeMatcher, serializeMatcher, convertKind, KIND_LABELS, ALL_KINDS } from './matcher-tree.js';
+import { normalizeMatcher, serializeMatcher, convertType, TYPE_LABELS, ALL_TYPES } from './matcher-tree.js';
 import { parseGeositeRef, formatGeositeRef } from '../../lib/geosite-ref.js';
-import { parseCidr } from '../../lib/ip.js';
+import { parseCidr, parseIp } from '../../lib/ip.js';
 import { buildTraceView } from '../lib/trace-view.js';
 import { elem } from '../lib/dom.js';
 
@@ -128,8 +128,12 @@ function renderRule(rule, index) {
   enabledToggle.addEventListener('change', () => updateRule(index, { enabled: enabledToggle.checked }));
 
   const actionLabel = elem('span', { class: rule.action === 'block' ? 'action-block' : 'action-allow' }, rule.action.toUpperCase());
-  const biBadge = rule.bidirectional ? elem('span', { class: 'rule-badge', title: 'Fires in both directions' }, 'bidirectional') : null;
-  const stripBadge = rule.strip_referrer_on_navigation
+  const isolate = rule.mode === 'isolate';
+  const isolateBadge = isolate ? elem('span', { class: 'rule-badge', title: 'Matches when source XOR destination is in the match' }, 'isolate') : null;
+  const biBadge = !isolate && rule.bidirectional
+    ? elem('span', { class: 'rule-badge', title: 'Fires in both directions' }, 'bidirectional')
+    : null;
+  const stripBadge = rule.strip_referrer
     ? elem('span', { class: 'rule-badge', title: 'Strip Referrer on top-level navigations that match this rule' }, 'strip-referrer')
     : null;
 
@@ -141,36 +145,39 @@ function renderRule(rule, index) {
     button('Delete', () => deleteRule(index), { class: 'danger' }),
   );
 
+  const summaryText = isolate
+    ? `ISOLATE ${describeMatcher(rule.match)}`
+    : (rule.bidirectional
+      ? `SRC ${describeMatcher(rule.source)} ↔ DST ${describeMatcher(rule.destination)}`
+      : `SRC ${describeMatcher(rule.source)} → DST ${describeMatcher(rule.destination)}`);
+
   card.append(
     elem('div', { class: 'rule-header' },
       enabledToggle,
       elem('span', { class: 'rule-name' }, rule.name || `Rule ${index + 1}`),
       actionLabel,
+      isolateBadge,
       biBadge,
       stripBadge,
       actions,
     ),
-    elem('div', { class: 'rule-summary' },
-      rule.bidirectional
-        ? `IF website ${describeMatcher(rule.website)} ↔ resource ${describeMatcher(rule.resource)} → ${rule.action.toUpperCase()}`
-        : `IF website ${describeMatcher(rule.website)} AND resource ${describeMatcher(rule.resource)} → ${rule.action.toUpperCase()}`,
-    ),
+    elem('div', { class: 'rule-summary' }, summaryText),
   );
   return card;
 }
 
 function describeMatcher(matcher) {
   if (!matcher) return '?';
-  switch (matcher.kind) {
+  switch (matcher.type) {
     case 'any': return 'ANY';
     case 'geosite': return `geosite:${matcher.tag}${matcher.attr ? '@' + matcher.attr : ''}`;
     case 'geoip':   return `geoip:${matcher.tag}`;
     case 'domain':  return `domain:/${matcher.regex}/`;
     case 'url':     return `url:/${matcher.regex}/`;
     case 'ip':      return `ip:${matcher.cidr}`;
-    case 'all_of':  return `(${matcher.terms.map(describeMatcher).join(' AND ')})`;
-    case 'any_of':  return `(${matcher.terms.map(describeMatcher).join(' OR ')})`;
-    case 'not':     return `NOT ${describeMatcher(matcher.term)}`;
+    case 'and':  return `(${matcher.matches.map(describeMatcher).join(' AND ')})`;
+    case 'or':  return `(${matcher.matches.map(describeMatcher).join(' OR ')})`;
+    case 'not':     return `NOT ${describeMatcher(matcher.match)}`;
     default: return JSON.stringify(matcher);
   }
 }
@@ -223,38 +230,66 @@ async function persist(config) {
 
 function openRuleEditor(index) {
   const isNew = index === -1;
-  const rule = isNew
-    ? { name: '', enabled: true, bidirectional: false, strip_referrer_on_navigation: false, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }
-    : structuredClone(currentConfig.rules[index]);
+  const existing = isNew ? null : structuredClone(currentConfig.rules[index]);
+  const initialMode = existing?.mode === 'isolate' ? 'isolate' : 'flow';
 
   $('rule-dialog-title').textContent = isNew ? 'New rule' : 'Edit rule';
-  $('rule-name').value = rule.name;
-  $('rule-enabled').checked = rule.enabled !== false;
-  $('rule-bidirectional').checked = rule.bidirectional === true;
-  $('rule-action').value = rule.action;
-  $('rule-strip-referrer').checked = rule.strip_referrer_on_navigation === true;
+  $('rule-name').value = existing?.name ?? '';
+  $('rule-enabled').checked = existing ? existing.enabled !== false : true;
+  $('rule-action').value = existing?.action ?? 'block';
+  $('rule-strip-referrer').checked = existing?.strip_referrer === true;
+  $('rule-bidirectional').checked = existing?.bidirectional === true;
+  $('rule-type').value = initialMode;
   $('rule-error').textContent = '';
 
-  const updateStripVisibility = () => {
+  const flowSourceInitial = existing?.mode === 'isolate' ? { type: 'any' } : (existing?.source ?? { type: 'any' });
+  const flowDestinationInitial = existing?.mode === 'isolate' ? { type: 'any' } : (existing?.destination ?? { type: 'any' });
+  const isolateMatchInitial = existing?.mode === 'isolate' ? (existing?.match ?? { type: 'any' }) : { type: 'any' };
+
+  const sourceEditor = mountMatcherEditor($('rule-source'), flowSourceInitial);
+  const destinationEditor = mountMatcherEditor($('rule-destination'), flowDestinationInitial);
+  const matchEditor = mountMatcherEditor($('rule-match'), isolateMatchInitial);
+
+  const updateVisibility = () => {
+    const isolate = $('rule-type').value === 'isolate';
     const isBlock = $('rule-action').value === 'block';
+    $('rule-flow-fieldsets').hidden = isolate;
+    $('rule-flow-destination-fieldset').hidden = isolate;
+    $('rule-isolate-fieldset').hidden = !isolate;
+    $('rule-bidirectional-row').hidden = isolate;
+    $('rule-bidirectional-hint').hidden = isolate;
+    $('rule-type-hint-flow').hidden = isolate;
+    $('rule-type-hint-isolate').hidden = !isolate;
     $('rule-strip-referrer-row').hidden = !isBlock;
     $('rule-strip-referrer-hint').hidden = !isBlock;
   };
-  updateStripVisibility();
-  $('rule-action').onchange = updateStripVisibility;
-
-  const websiteEditor = mountMatcherEditor($('rule-website'), rule.website);
-  const resourceEditor = mountMatcherEditor($('rule-resource'), rule.resource);
+  updateVisibility();
+  $('rule-action').onchange = updateVisibility;
+  $('rule-type').onchange = updateVisibility;
 
   $('rule-save').onclick = async event => {
     event.preventDefault();
-    rule.name = $('rule-name').value.trim();
-    rule.enabled = $('rule-enabled').checked;
-    rule.bidirectional = $('rule-bidirectional').checked;
-    rule.action = $('rule-action').value;
-    rule.strip_referrer_on_navigation = rule.action === 'block' && $('rule-strip-referrer').checked;
-    rule.website = websiteEditor.read();
-    rule.resource = resourceEditor.read();
+    const isolate = $('rule-type').value === 'isolate';
+    const action = $('rule-action').value;
+    const stripFlag = action === 'block' && $('rule-strip-referrer').checked;
+    const rule = isolate
+      ? {
+          name: $('rule-name').value.trim(),
+          enabled: $('rule-enabled').checked,
+          mode: 'isolate',
+          match: matchEditor.read(),
+          action,
+          strip_referrer: stripFlag,
+        }
+      : {
+          name: $('rule-name').value.trim(),
+          enabled: $('rule-enabled').checked,
+          bidirectional: $('rule-bidirectional').checked,
+          source: sourceEditor.read(),
+          destination: destinationEditor.read(),
+          action,
+          strip_referrer: stripFlag,
+        };
 
     const next = structuredClone(currentConfig);
     if (isNew) next.rules.push(rule);
@@ -285,20 +320,20 @@ function createMatcherEditor(node) {
   const headerRow = elem('div', { class: 'matcher-row' });
   const body = elem('div', { class: 'matcher-body' });
 
-  const kindSelect = elem('select', {});
-  for (const kind of ALL_KINDS) {
-    kindSelect.appendChild(elem('option', { value: kind }, KIND_LABELS[kind] ?? kind));
+  const typeSelect = elem('select', {});
+  for (const type of ALL_TYPES) {
+    typeSelect.appendChild(elem('option', { value: type }, TYPE_LABELS[type] ?? type));
   }
-  kindSelect.value = node.kind;
-  kindSelect.addEventListener('change', () => {
-    const next = convertKind(node, kindSelect.value);
+  typeSelect.value = node.type;
+  typeSelect.addEventListener('change', () => {
+    const next = convertType(node, typeSelect.value);
     Object.keys(node).forEach(key => delete node[key]);
     Object.assign(node, next);
     if (!Array.isArray(node.children)) node.children = [];
     rerender();
   });
 
-  headerRow.appendChild(kindSelect);
+  headerRow.appendChild(typeSelect);
   root.append(headerRow, body);
   rerender();
 
@@ -327,12 +362,12 @@ function createMatcherEditor(node) {
   }
 
   function rerender() {
-    headerRow.replaceChildren(kindSelect);
+    headerRow.replaceChildren(typeSelect);
     body.replaceChildren();
 
-    if (node.kind === 'any') return;
+    if (node.type === 'any') return;
 
-    if (node.kind === 'geosite') {
+    if (node.type === 'geosite') {
       leafInput({
         placeholder: 'tag or tag@attr (e.g. google or google@cn)',
         value: formatGeositeRef(node),
@@ -350,7 +385,7 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === 'geoip') {
+    if (node.type === 'geoip') {
       leafInput({
         placeholder: 'country code (e.g. CN)',
         value: typeof node.tag === 'string' ? node.tag : '',
@@ -359,7 +394,7 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === 'domain') {
+    if (node.type === 'domain') {
       validatedLeaf({
         placeholder: 'regex (e.g. \\.example\\.com$)',
         value: node.regex ?? '',
@@ -373,7 +408,7 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === 'url') {
+    if (node.type === 'url') {
       validatedLeaf({
         placeholder: 'regex against full URL (e.g. ^https://example\\.com/api/)',
         value: node.regex ?? '',
@@ -387,7 +422,7 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === 'ip') {
+    if (node.type === 'ip') {
       validatedLeaf({
         placeholder: 'CIDR (e.g. 10.0.0.0/8 or 2001:db8::/32)',
         value: node.cidr ?? '',
@@ -397,7 +432,7 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === '__advanced__') {
+    if (node.type === '__advanced__') {
       const area = elem('textarea', { rows: 6, spellcheck: false });
       area.value = node.json ?? '{}';
       area.addEventListener('input', () => { node.json = area.value; });
@@ -405,10 +440,10 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === 'all_of' || node.kind === 'any_of') {
+    if (node.type === 'and' || node.type === 'or') {
       if (!Array.isArray(node.children)) node.children = [];
       headerRow.appendChild(button('+ Add term', () => {
-        node.children.push(normalizeMatcher({ kind: 'any' }));
+        node.children.push(normalizeMatcher({ type: 'any' }));
         rerender();
       }, { class: 'matcher-add-term' }));
       const childrenWrap = elem('div', { class: 'matcher-children matcher-nested' });
@@ -417,9 +452,9 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.kind === 'not') {
+    if (node.type === 'not') {
       if (!Array.isArray(node.children) || node.children.length === 0) {
-        node.children = [normalizeMatcher({ kind: 'any' })];
+        node.children = [normalizeMatcher({ type: 'any' })];
       }
       const wrap = elem('div', { class: 'matcher-children matcher-nested' });
       wrap.appendChild(createMatcherEditor(node.children[0]).element);
@@ -552,9 +587,7 @@ function labelInline(text, child) {
 }
 
 async function triggerDataUpdate(target) {
-  const updatePromise = send({ kind: 'data.update', target });
-  setTimeout(refreshData, 50);
-  const reply = await updatePromise;
+  const reply = await send({ kind: 'data.update', target });
   if (!reply?.ok) showCardBanner('data-card', `Update failed: ${reply?.error ?? 'unknown'}`, 'error');
   await refreshData();
 }
@@ -584,6 +617,18 @@ function readRemoteForm() {
 function bindStaticEvents() {
   $('rule-add').addEventListener('click', () => openRuleEditor(-1));
   $('test-run').addEventListener('click', runTester);
+  $('test-clear').addEventListener('click', () => {
+    $('test-source').value = '';
+    $('test-destination').value = '';
+    $('test-destination-ip').value = '';
+    $('test-destination-ip').dispatchEvent(new Event('input'));
+    $('test-output').replaceChildren();
+  });
+  attachValidator(
+    $('test-destination-ip'),
+    $('test-destination-ip-hint'),
+    { validate: parseIp, message: 'invalid IP' },
+  );
   $('data-update-all').addEventListener('click', () => triggerDataUpdate('all'));
   $('data-save-all').addEventListener('click', saveAllDataSources);
 
@@ -651,24 +696,24 @@ function bindStaticEvents() {
 }
 
 async function runTester() {
-  const websiteUrl = $('test-website').value.trim();
-  const resourceUrl = $('test-resource').value.trim();
-  const resourceIp = $('test-ip').value.trim();
+  const sourceUrl = $('test-source').value.trim();
+  const destinationUrl = $('test-destination').value.trim();
+  const destinationIp = $('test-destination-ip').value.trim();
   const output = $('test-output');
-  if (!resourceUrl) {
-    output.replaceChildren(elem('span', { class: 'muted' }, 'Provide a resource URL'));
+  if (!destinationUrl) {
+    output.replaceChildren(elem('span', { class: 'muted' }, 'Provide a destination URL'));
     return;
   }
   output.replaceChildren(elem('span', { class: 'muted' }, 'Evaluating…'));
-  const reply = await send({ kind: 'tester.evaluate', websiteUrl, resourceUrl, resourceIp });
+  const reply = await send({ kind: 'tester.evaluate', sourceUrl, destinationUrl, destinationIp });
   if (!reply?.ok) {
     output.replaceChildren(elem('span', { class: 'error' }, `Error: ${reply?.error ?? 'unknown'}`));
     return;
   }
   const result = reply.result;
   const view = buildTraceView({
-    page: websiteUrl || '',
-    resource: resourceUrl || '',
+    source: sourceUrl || '',
+    destination: destinationUrl || '',
     verdict: result.verdict,
     matchedRule: result.matchedRule,
     trace: result.trace ?? [],
@@ -779,6 +824,19 @@ function button(label, onClick, props = {}) {
   return elem('button', { ...props, onclick: onClick }, label);
 }
 
+function attachValidator(input, hint, { validate, message }) {
+  if (!input || !hint) return;
+  const update = () => {
+    const value = input.value.trim();
+    const ok = !value || validate(value);
+    input.classList.toggle('invalid', !ok);
+    hint.textContent = ok ? '' : message;
+  };
+  input.addEventListener('input', update);
+  input.addEventListener('blur', update);
+  update();
+}
+
 function validatedInput({ validate, message, ...inputProps }) {
   const wrap = elem('div', { class: 'validated' });
   const input = elem('input', inputProps);
@@ -795,4 +853,7 @@ function validatedInput({ validate, message, ...inputProps }) {
   return wrap;
 }
 
-init();
+init().catch(error => {
+  const node = document.getElementById('status-line');
+  if (node) node.textContent = `Initialization failed: ${error?.message ?? error}`;
+});

@@ -39,7 +39,7 @@ export function buildTraceView(payload) {
       btnCopy.classList.add('copied');
       btnCopy.disabled = true;
       setTimeout(() => { btnCopy.classList.remove('copied'); btnCopy.disabled = false; }, 1200);
-    } catch { /* clipboard denied */ }
+    } catch { /* ... */ }
   });
 
   wrap.append(toolbar, body);
@@ -48,18 +48,18 @@ export function buildTraceView(payload) {
 
 function formatText(p) {
   const lines = [];
-  if (p.page) lines.push(`Page:     ${p.page}`);
-  if (p.resource) lines.push(`Resource: ${p.resource}`);
-  if (p.verdict) lines.push(`Verdict:  ${p.verdict.toUpperCase()}`);
+  if (p.source) lines.push(`Source:      ${p.source}`);
+  if (p.destination) lines.push(`Destination: ${p.destination}`);
+  if (p.verdict) lines.push(`Verdict:     ${p.verdict.toUpperCase()}`);
   const rule = p.matchedRule;
   if (rule) {
-    lines.push(`Rule:     #${rule.index + 1}${rule.name ? ` (${rule.name})` : ''}${rule.direction ? ` [${rule.direction}]` : ''}`);
+    lines.push(`Rule:        #${rule.index + 1}${rule.name ? ` (${rule.name})` : ''}${rule.direction ? ` [${rule.direction}]` : ''}`);
   } else if (p.mode === 'full') {
-    lines.push('Rule:     (none — default action)');
+    lines.push('Rule:        (none — default action)');
   }
   if (p.contexts && p.mode === 'full') {
-    lines.push(`Website:  host=${p.contexts.website?.host ?? '?'} ips=${formatIps(p.contexts.website?.ips)}`);
-    lines.push(`Resource: host=${p.contexts.resource?.host ?? '?'} ips=${formatIps(p.contexts.resource?.ips)}`);
+    lines.push(`Source ctx:      host=${p.contexts.source?.host ?? '?'} ips=${formatIps(p.contexts.source?.ips)}`);
+    lines.push(`Destination ctx: host=${p.contexts.destination?.host ?? '?'} ips=${formatIps(p.contexts.destination?.ips)}`);
   }
 
   if (lines.length) lines.push('');
@@ -71,13 +71,13 @@ function formatText(p) {
   } else {
     for (const step of steps) {
       const biTag = step.bidirectional ? ' bidirectional' : '';
-      lines.push(`  rule #${step.ruleIndex + 1} (${step.ruleName || '-'}) action=${step.action}${biTag} -> website=${formatHit(step.websiteHit)}, resource=${formatHit(step.resourceHit)}`);
-      if (step.websiteTrace) lines.push('    website matcher:', ...formatMatcherTrace(step.websiteTrace, 6));
-      if (step.resourceTrace) lines.push('    resource matcher:', ...formatMatcherTrace(step.resourceTrace, 6));
-      if (step.bidirectional && step.reverseWebsiteHit !== null) {
-        lines.push(`    reverse pass (swapped) -> website=${formatHit(step.reverseWebsiteHit)}, resource=${formatHit(step.reverseResourceHit)}`);
-        if (step.reverseWebsiteTrace) lines.push('      website matcher:', ...formatMatcherTrace(step.reverseWebsiteTrace, 8));
-        if (step.reverseResourceTrace) lines.push('      resource matcher:', ...formatMatcherTrace(step.reverseResourceTrace, 8));
+      lines.push(`  rule #${step.ruleIndex + 1} (${step.ruleName || '-'}) action=${step.action}${biTag} -> source=${formatHit(step.sourceHit)}, destination=${formatHit(step.destinationHit)}`);
+      if (step.sourceTrace) lines.push('    source matcher:', ...formatMatcherTrace(step.sourceTrace, 6));
+      if (step.destinationTrace) lines.push('    destination matcher:', ...formatMatcherTrace(step.destinationTrace, 6));
+      if (step.bidirectional && step.reverseSourceHit !== null) {
+        lines.push(`    reverse pass (swapped) -> source=${formatHit(step.reverseSourceHit)}, destination=${formatHit(step.reverseDestinationHit)}`);
+        if (step.reverseSourceTrace) lines.push('      source matcher:', ...formatMatcherTrace(step.reverseSourceTrace, 8));
+        if (step.reverseDestinationTrace) lines.push('      destination matcher:', ...formatMatcherTrace(step.reverseDestinationTrace, 8));
       }
     }
   }
@@ -86,18 +86,18 @@ function formatText(p) {
 
 function appendStepMatchersOnly(lines, step, direction) {
   if (direction === 'reverse') {
-    if (step.reverseWebsiteTrace) lines.push(...formatMatcherTrace(step.reverseWebsiteTrace, 0));
-    if (step.reverseResourceTrace) lines.push(...formatMatcherTrace(step.reverseResourceTrace, 0));
+    if (step.reverseSourceTrace) lines.push(...formatMatcherTrace(step.reverseSourceTrace, 0));
+    if (step.reverseDestinationTrace) lines.push(...formatMatcherTrace(step.reverseDestinationTrace, 0));
   } else {
-    if (step.websiteTrace) lines.push(...formatMatcherTrace(step.websiteTrace, 0));
-    if (step.resourceTrace) lines.push(...formatMatcherTrace(step.resourceTrace, 0));
+    if (step.sourceTrace) lines.push(...formatMatcherTrace(step.sourceTrace, 0));
+    if (step.destinationTrace) lines.push(...formatMatcherTrace(step.destinationTrace, 0));
   }
 }
 
 function formatJson(p) {
   const out = {};
-  if (p.page) out.page = p.page;
-  if (p.resource) out.resource = p.resource;
+  if (p.source) out.source = p.source;
+  if (p.destination) out.destination = p.destination;
   if (p.verdict) out.verdict = p.verdict;
   if (p.matchedRule) out.matchedRule = p.matchedRule;
   if (p.contexts && p.mode === 'full') out.contexts = p.contexts;

@@ -64,8 +64,8 @@ function buildEntryNode(entry) {
   const details = elem('details', { class: 'block-entry' });
 
   const summaryText = stripped
-    ? (entry.websiteUrl || entry.websiteHost || entry.resourceUrl)
-    : entry.resourceUrl;
+    ? (entry.sourceUrl || entry.sourceHost || entry.destinationUrl)
+    : entry.destinationUrl;
   const ruleName = entry.matchedRule?.name
     || (entry.matchedRule ? `#${entry.matchedRule.index + 1}` : '');
 
@@ -81,8 +81,8 @@ function buildEntryNode(entry) {
 
   if (entry.trace?.length) {
     body.appendChild(buildTraceView({
-      page: entry.websiteUrl || entry.websiteHost || '',
-      resource: entry.resourceUrl,
+      source: entry.sourceUrl || entry.sourceHost || '',
+      destination: entry.destinationUrl,
       verdict: stripped ? 'referrer-stripped' : 'block',
       matchedRule: entry.matchedRule,
       trace: entry.trace,
@@ -97,4 +97,7 @@ function buildEntryNode(entry) {
   return details;
 }
 
-init();
+init().catch(error => {
+  const list = document.getElementById('blocks-list');
+  if (list) list.replaceChildren(elem('div', { class: 'muted small' }, `Initialization failed: ${error?.message ?? error}`));
+});

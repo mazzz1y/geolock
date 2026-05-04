@@ -33,8 +33,8 @@ export const tests = [
     run: () => {
       const tabId = 100;
       blockLog.clearTab(tabId);
-      blockLog.record(tabId, { ts: Date.now(), resourceUrl: 'https://x.com/', resourceHost: 'x.com', resourceType: 'image' });
-      blockLog.record(tabId, { ts: Date.now(), resourceUrl: 'https://y.com/', resourceHost: 'y.com', resourceType: 'image' });
+      blockLog.record(tabId, { ts: Date.now(), destinationUrl: 'https://x.com/', destinationHost: 'x.com', destinationType: 'image', sourceHost: '', sourceUrl: '', effect: 'block' });
+      blockLog.record(tabId, { ts: Date.now(), destinationUrl: 'https://y.com/', destinationHost: 'y.com', destinationType: 'image', sourceHost: '', sourceUrl: '', effect: 'block' });
       drain();
       updateBadge(tabId);
       const call = badgeCalls.find(c => c.fn === 'setBadgeText');

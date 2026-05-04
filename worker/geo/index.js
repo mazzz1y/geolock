@@ -142,5 +142,5 @@ export function getReloadError(kind) {
 
 export function flushWebRequestCache() {
   try { browser.webRequest.handlerBehaviorChanged(); }
-  catch { /* throttled or unsupported */ }
+  catch { /* ... */ }
 }

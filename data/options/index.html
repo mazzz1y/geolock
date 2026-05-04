@@ -16,7 +16,7 @@
 
       <section class="card" id="rules-card">
         <h2>Rules</h2>
-        <p class="muted">Each rule matches a website (page) and a resource (sub-request) and decides whether to allow or block</p>
+        <p class="muted">Each rule matches a source (page) and a destination (sub-request) and decides whether to allow or block</p>
         <div class="row">
           <label class="inline">Default action
             <select id="default-action">
@@ -35,18 +35,20 @@
         <h2>Tester</h2>
         <p class="muted">Evaluate a hypothetical request against your rules</p>
         <div class="grid">
-          <label>Website URL
-            <input type="url" id="test-website" placeholder="https://example.com" />
+          <label>Source URL
+            <input type="url" id="test-source" placeholder="https://example.com" autocomplete="off" spellcheck="false" />
           </label>
-          <label>Resource URL
-            <input type="url" id="test-resource" placeholder="https://cdn.example.net/foo.js" />
+          <label>Destination URL
+            <input type="url" id="test-destination" placeholder="https://cdn.example.net/foo.js" autocomplete="off" spellcheck="false" />
           </label>
-          <label>Resource IP override (optional)
-            <input type="text" id="test-ip" placeholder="1.2.3.4" />
+          <label>Destination IP override (optional)
+            <input type="text" id="test-destination-ip" placeholder="1.2.3.4" autocomplete="off" spellcheck="false" />
+            <span id="test-destination-ip-hint" class="inline-validation error"></span>
           </label>
         </div>
         <div class="card-actions">
           <button id="test-run" class="primary">Evaluate</button>
+          <button id="test-clear">Clear</button>
         </div>
         <div id="test-output" class="tester-output" aria-live="polite"></div>
       </section>
@@ -140,19 +142,31 @@
           <input type="text" id="rule-name" />
         </label>
         <label class="inline"><input type="checkbox" id="rule-enabled" /> Enabled</label>
-        <label class="inline"><input type="checkbox" id="rule-bidirectional" /> Bidirectional</label>
-        <p class="muted small">Also fires when website and resource matchers are swapped</p>
+        <label class="inline">Type
+          <select id="rule-type">
+            <option value="flow">Flow</option>
+            <option value="isolate">Isolate</option>
+          </select>
+        </label>
+        <p class="muted small" id="rule-type-hint-flow">Flow rules match when source AND destination both match their matchers</p>
+        <p class="muted small" id="rule-type-hint-isolate" hidden>Isolate rules match when exactly one of source or destination is in the set (XOR)</p>
+        <label class="inline" id="rule-bidirectional-row"><input type="checkbox" id="rule-bidirectional" /> Bidirectional</label>
+        <p class="muted small" id="rule-bidirectional-hint">Also fires when source and destination matchers are swapped</p>
         <label class="inline" id="rule-strip-referrer-row" hidden>
           <input type="checkbox" id="rule-strip-referrer" /> Strip Referrer
         </label>
         <p class="muted small" id="rule-strip-referrer-hint" hidden>Remove the Referrer header on top-level navigations that match this rule</p>
-        <fieldset>
-          <legend>Website matcher</legend>
-          <div id="rule-website"></div>
+        <fieldset id="rule-flow-fieldsets">
+          <legend>Source matcher</legend>
+          <div id="rule-source"></div>
         </fieldset>
-        <fieldset>
-          <legend>Resource matcher</legend>
-          <div id="rule-resource"></div>
+        <fieldset id="rule-flow-destination-fieldset">
+          <legend>Destination matcher</legend>
+          <div id="rule-destination"></div>
+        </fieldset>
+        <fieldset id="rule-isolate-fieldset" hidden>
+          <legend>Match</legend>
+          <div id="rule-match"></div>
         </fieldset>
         <label class="inline">Action
           <select id="rule-action">

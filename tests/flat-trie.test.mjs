@@ -64,11 +64,11 @@ export const tests = [
     run: () => {
       const b = new FlatDomainSuffixTreeBuilder();
       b.addFull('exact.example.com', 1);
-      b.addSuffix('google.com', 2);
+      b.addSuffix('search.example', 2);
       const t = b.finish();
       setEqual(t.lookup('exact.example.com'), [1]);
-      setEqual(t.lookup('mail.google.com'), [2]);
-      setEqual(t.lookup('google.com'), [2]);
+      setEqual(t.lookup('mail.search.example'), [2]);
+      setEqual(t.lookup('search.example'), [2]);
       setEqual(t.lookup('not-exact.example.com'), []);
     },
   },
@@ -76,20 +76,20 @@ export const tests = [
     name: 'flat domain suffix tree builder: plain substring',
     run: () => {
       const b = new FlatDomainSuffixTreeBuilder();
-      b.addPlain('baidu', 5);
+      b.addPlain('shop', 5);
       const t = b.finish();
-      setEqual(t.lookup('www.baidu.com'), [5]);
-      setEqual(t.lookup('not-relevant.com'), []);
+      setEqual(t.lookup('www.shop.example'), [5]);
+      setEqual(t.lookup('not-relevant.example'), []);
     },
   },
   {
     name: 'flat domain suffix tree builder: regex',
     run: () => {
       const b = new FlatDomainSuffixTreeBuilder();
-      b.addRegex('^.*\\.gstatic\\.com$', 9);
+      b.addRegex('^.*\\.static\\.example$', 9);
       const t = b.finish();
-      setEqual(t.lookup('cdn.gstatic.com'), [9]);
-      setEqual(t.lookup('cdn.gstatic.org'), []);
+      setEqual(t.lookup('cdn.static.example'), [9]);
+      setEqual(t.lookup('cdn.static.test'), []);
     },
   },
   {
@@ -107,10 +107,10 @@ export const tests = [
     name: 'flat domain suffix tree builder: multiple entryIds per key',
     run: () => {
       const b = new FlatDomainSuffixTreeBuilder();
-      b.addSuffix('google.com', 1);
-      b.addSuffix('google.com', 2);
+      b.addSuffix('search.example', 1);
+      b.addSuffix('search.example', 2);
       const t = b.finish();
-      setEqual(t.lookup('mail.google.com'), [1, 2]);
+      setEqual(t.lookup('mail.search.example'), [1, 2]);
     },
   },
 ];

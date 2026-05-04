@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { deriveWebsiteContext, evaluateRequest } from '../worker/enforcer.js';
+import { deriveSourceContext, evaluateRequest, cachePutVerdict, cacheTakeVerdict, _verdictCacheSize, _hasStripRule, setConfig, probe } from '../worker/enforcer.js';
+import * as geo from '../worker/geo/index.js';
 import { parseIp } from '../lib/ip.js';
+
+await geo.reloadAll().catch(() => {});
 
 function framesWith(tabId, frameId, frame) {
   const inner = new Map([[frameId, frame]]);
@@ -13,8 +16,8 @@ const blockGeoipCnConfig = {
   dns: { match_strategy: 'all' },
   rules: [{
     enabled: true,
-    website: { kind: 'any' },
-    resource: { kind: 'geoip', tag: 'cn' },
+    source: { type: 'any' },
+    destination: { type: 'geoip', tag: 'cn' },
     action: 'block',
   }],
 };
@@ -43,7 +46,7 @@ export const tests = [
     name: 'tabId>=0 with matching frame uses frame host',
     run: () => {
       const frames = framesWith(7, 2, { host: 'iframe.example', url: 'https://iframe.example/x', parentFrameId: 0 });
-      const ctx = deriveWebsiteContext({ tabId: 7, frameId: 2, url: 'https://r.example/y' }, frames);
+      const ctx = deriveSourceContext({ tabId: 7, frameId: 2, url: 'https://r.example/y' }, frames);
       assert.equal(ctx.host, 'iframe.example');
       assert.equal(ctx.url, 'https://iframe.example/x');
     },
@@ -52,14 +55,14 @@ export const tests = [
     name: 'tabId>=0 frame missing falls back to top frame',
     run: () => {
       const frames = framesWith(3, 0, { host: 'top.example', url: 'https://top.example/', parentFrameId: -1 });
-      const ctx = deriveWebsiteContext({ tabId: 3, frameId: 99, url: 'https://r/' }, frames);
+      const ctx = deriveSourceContext({ tabId: 3, frameId: 99, url: 'https://r/' }, frames);
       assert.equal(ctx.host, 'top.example');
     },
   },
   {
     name: 'tabId>=0 no frame map falls back to documentUrl',
     run: () => {
-      const ctx = deriveWebsiteContext({
+      const ctx = deriveSourceContext({
         tabId: 5,
         frameId: 0,
         documentUrl: 'https://owner.example/page',
@@ -72,7 +75,7 @@ export const tests = [
   {
     name: 'tabId<0 uses documentUrl',
     run: () => {
-      const ctx = deriveWebsiteContext({
+      const ctx = deriveSourceContext({
         tabId: -1,
         frameId: -1,
         documentUrl: 'https://doc.example/p',
@@ -85,7 +88,7 @@ export const tests = [
   {
     name: 'tabId<0 no documentUrl uses originUrl',
     run: () => {
-      const ctx = deriveWebsiteContext({
+      const ctx = deriveSourceContext({
         tabId: -1,
         frameId: -1,
         documentUrl: '',
@@ -99,7 +102,7 @@ export const tests = [
   {
     name: 'tabId<0 only initiator falls back to it',
     run: () => {
-      const ctx = deriveWebsiteContext({
+      const ctx = deriveSourceContext({
         tabId: -1,
         frameId: -1,
         initiator: 'https://init.example',
@@ -109,9 +112,9 @@ export const tests = [
     },
   },
   {
-    name: 'no metadata returns empty website context',
+    name: 'no metadata returns empty source context',
     run: () => {
-      const ctx = deriveWebsiteContext({ tabId: -1, frameId: -1, url: 'https://r/' }, new Map());
+      const ctx = deriveSourceContext({ tabId: -1, frameId: -1, url: 'https://r/' }, new Map());
       assert.equal(ctx.host, '');
       assert.equal(ctx.url, '');
     },
@@ -132,9 +135,9 @@ export const tests = [
         rules: [{
           enabled: true,
           action: 'block',
-          strip_referrer_on_navigation: true,
-          website: { kind: 'domain', regex: '(^|\\.)mybank\\.com$' },
-          resource: { kind: 'any' },
+          strip_referrer: true,
+          source: { type: 'domain', regex: '(^|\\.)mybank\\.com$' },
+          destination: { type: 'any' },
         }],
       };
       const result = await evaluateRequest({
@@ -156,9 +159,9 @@ export const tests = [
         rules: [{
           enabled: true,
           action: 'block',
-          strip_referrer_on_navigation: false,
-          website: { kind: 'domain', regex: '(^|\\.)mybank\\.com$' },
-          resource: { kind: 'any' },
+          strip_referrer: false,
+          source: { type: 'domain', regex: '(^|\\.)mybank\\.com$' },
+          destination: { type: 'any' },
         }],
       };
       const result = await evaluateRequest({
@@ -179,9 +182,9 @@ export const tests = [
         rules: [{
           enabled: true,
           action: 'block',
-          strip_referrer_on_navigation: true,
-          website: { kind: 'any' },
-          resource: { kind: 'any' },
+          strip_referrer: true,
+          source: { type: 'any' },
+          destination: { type: 'any' },
         }],
       };
       const result = await evaluateRequest({ type: 'csp_report', url: 'https://x/', tabId: -1, frameId: -1 }, baseDeps({ config: stripConfig }));
@@ -249,8 +252,8 @@ export const tests = [
         dns: { match_strategy: 'all' },
         rules: [{
           enabled: true,
-          website: { kind: 'any' },
-          resource: { kind: 'domain', regex: 'cdn' },
+          source: { type: 'any' },
+          destination: { type: 'domain', regex: 'cdn' },
           action: 'block',
         }],
       };
@@ -286,12 +289,12 @@ export const tests = [
     },
   },
   {
-    name: 'evaluateRequest: same-host resource skips rule evaluation',
+    name: 'evaluateRequest: same-host destination skips rule evaluation',
     run: async () => {
       const config = {
         default_action: 'allow',
         dns: { match_strategy: 'all' },
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
       const frames = framesWith(7, 0, { host: 'ifconfig.co', url: 'https://ifconfig.co/', parentFrameId: -1 });
       const result = await evaluateRequest({
@@ -301,12 +304,12 @@ export const tests = [
     },
   },
   {
-    name: 'evaluateRequest: subdomain of website is treated as same-site',
+    name: 'evaluateRequest: subdomain of source is treated as same-site',
     run: async () => {
       const config = {
         default_action: 'allow',
         dns: { match_strategy: 'all' },
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
       const frames = framesWith(7, 0, { host: 'example.com', url: 'https://example.com/', parentFrameId: -1 });
       const result = await evaluateRequest({
@@ -316,12 +319,12 @@ export const tests = [
     },
   },
   {
-    name: 'evaluateRequest: website subdomain of resource is same-site',
+    name: 'evaluateRequest: source subdomain of destination is same-site',
     run: async () => {
       const config = {
         default_action: 'allow',
         dns: { match_strategy: 'all' },
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
       const frames = framesWith(7, 0, { host: 'app.example.com', url: 'https://app.example.com/', parentFrameId: -1 });
       const result = await evaluateRequest({
@@ -336,7 +339,7 @@ export const tests = [
       const config = {
         default_action: 'allow',
         dns: { match_strategy: 'all' },
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
       const frames = framesWith(7, 0, { host: 'example.com', url: 'https://example.com/', parentFrameId: -1 });
       const result = await evaluateRequest({
@@ -346,12 +349,12 @@ export const tests = [
     },
   },
   {
-    name: 'evaluateRequest: empty website host falls through to evaluation',
+    name: 'evaluateRequest: empty source host falls through to evaluation',
     run: async () => {
       const config = {
         default_action: 'allow',
         dns: { match_strategy: 'all' },
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
       const result = await evaluateRequest({
         type: 'image', url: 'https://example.com/img.png', tabId: -1, frameId: -1,
@@ -365,12 +368,174 @@ export const tests = [
       const config = {
         default_action: 'allow',
         dns: { match_strategy: 'all' },
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
       const frames = framesWith(7, 0, { host: 'example.com', url: 'https://example.com/', parentFrameId: -1 });
       const result = await evaluateRequest({
         type: 'image', url: 'https://otherexample.com/img.png', tabId: 7, frameId: 0,
       }, baseDeps({ config, frames }));
+      assert.equal(result.verdict, 'block');
+    },
+  },
+  {
+    name: 'verdict cache: put then take returns the same result and removes from cache',
+    run: () => {
+      const result = { verdict: 'block', matchedRule: { index: 0, name: 'r' } };
+      cachePutVerdict('req-1', result);
+      const taken = cacheTakeVerdict('req-1');
+      assert.equal(taken, result);
+      assert.equal(cacheTakeVerdict('req-1'), undefined);
+    },
+  },
+  {
+    name: 'verdict cache: take returns undefined for unknown requestId',
+    run: () => {
+      assert.equal(cacheTakeVerdict('does-not-exist'), undefined);
+    },
+  },
+  {
+    name: 'verdict cache: null/undefined requestId is a no-op',
+    run: () => {
+      const before = _verdictCacheSize();
+      cachePutVerdict(null, { verdict: 'allow' });
+      cachePutVerdict(undefined, { verdict: 'allow' });
+      assert.equal(_verdictCacheSize(), before);
+      assert.equal(cacheTakeVerdict(null), undefined);
+      assert.equal(cacheTakeVerdict(undefined), undefined);
+    },
+  },
+  {
+    name: 'verdict cache: oldest entry evicted when full',
+    run: () => {
+      for (let i = 0; i < 200; i++) cacheTakeVerdict(`drain-${i}`);
+      for (let i = 0; i < 100; i++) cachePutVerdict(`r-${i}`, { verdict: 'allow', n: i });
+      assert.equal(_verdictCacheSize(), 100);
+      cachePutVerdict('r-100', { verdict: 'allow', n: 100 });
+      assert.equal(_verdictCacheSize(), 100);
+      assert.equal(cacheTakeVerdict('r-0'), undefined, 'oldest entry evicted');
+      assert.ok(cacheTakeVerdict('r-100'), 'newest entry retained');
+    },
+  },
+  {
+    name: 'verdict cache: take returns undefined for ids that were never cached',
+    run: () => {
+      assert.equal(cacheTakeVerdict('phantom-id'), undefined);
+    },
+  },
+  {
+    name: 'setConfig: strip rule flag is true when an enabled block rule sets strip_referrer',
+    run: () => {
+      setConfig({
+        default_action: 'allow',
+        rules: [{ enabled: true, action: 'block', strip_referrer: true,
+          source: { type: 'any' }, destination: { type: 'any' } }],
+      });
+      assert.equal(_hasStripRule(), true);
+    },
+  },
+  {
+    name: 'setConfig: strip rule flag is false when no rule has the flag',
+    run: () => {
+      setConfig({
+        default_action: 'allow',
+        rules: [{ enabled: true, action: 'block',
+          source: { type: 'any' }, destination: { type: 'any' } }],
+      });
+      assert.equal(_hasStripRule(), false);
+    },
+  },
+  {
+    name: 'setConfig: strip rule flag false when rule with flag is disabled',
+    run: () => {
+      setConfig({
+        default_action: 'allow',
+        rules: [{ enabled: false, action: 'block', strip_referrer: true,
+          source: { type: 'any' }, destination: { type: 'any' } }],
+      });
+      assert.equal(_hasStripRule(), false);
+    },
+  },
+  {
+    name: 'setConfig: strip rule flag false when rule with flag has action: allow',
+    run: () => {
+      setConfig({
+        default_action: 'allow',
+        rules: [{ enabled: true, action: 'allow', strip_referrer: true,
+          source: { type: 'any' }, destination: { type: 'any' } }],
+      });
+      assert.equal(_hasStripRule(), false);
+    },
+  },
+  {
+    name: 'probe: returns verdict + trace + contexts for plain inputs',
+    run: async () => {
+      setConfig({
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, action: 'block',
+          source: { type: 'any' },
+          destination: { type: 'domain', regex: '\\.example$' } }],
+      });
+      const result = await probe({
+        sourceUrl: 'https://a.test/',
+        destinationUrl: 'https://b.example/',
+      });
+      assert.equal(result.verdict, 'block');
+      assert.equal(result.contexts.source.host, 'a.test');
+      assert.equal(result.contexts.destination.host, 'b.example');
+      assert.ok(Array.isArray(result.trace));
+    },
+  },
+  {
+    name: 'probe: destinationIp override is parsed and used',
+    run: async () => {
+      setConfig({
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, action: 'block',
+          source: { type: 'any' },
+          destination: { type: 'ip', cidr: '1.2.3.0/24' } }],
+      });
+      const result = await probe({
+        sourceUrl: 'https://a.test/',
+        destinationUrl: 'https://b.test/',
+        destinationIp: '1.2.3.4',
+      });
+      assert.equal(result.verdict, 'block');
+      assert.deepEqual(result.contexts.destination.ips, ['1.2.3.4']);
+    },
+  },
+  {
+    name: 'probe: invalid destinationIp is silently dropped',
+    run: async () => {
+      setConfig({
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, action: 'block',
+          source: { type: 'any' },
+          destination: { type: 'ip', cidr: '1.2.3.0/24' } }],
+      });
+      const result = await probe({
+        sourceUrl: 'https://a.test/',
+        destinationUrl: 'https://b.test/',
+        destinationIp: 'not-an-ip',
+      });
+      assert.equal(result.verdict, 'allow');
+      assert.deepEqual(result.contexts.destination.ips, []);
+    },
+  },
+  {
+    name: 'probe: bare host without scheme is normalized',
+    run: async () => {
+      setConfig({
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, action: 'block',
+          source: { type: 'any' },
+          destination: { type: 'domain', regex: '^cdn\\.test$' } }],
+      });
+      const result = await probe({ sourceUrl: 'a.test', destinationUrl: 'cdn.test' });
+      assert.equal(result.contexts.destination.host, 'cdn.test');
       assert.equal(result.verdict, 'block');
     },
   },

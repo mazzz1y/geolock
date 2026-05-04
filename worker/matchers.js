@@ -1,8 +1,5 @@
 import { parseCidr, ipInCidr, ipToString } from '../lib/ip.js';
 
-export const MATCHER_KINDS = ['any', 'geosite', 'geoip', 'domain', 'url', 'ip', 'all_of', 'any_of', 'not'];
-
-// Tri-state sentinel for "cannot decide with current context data".
 export const UNDECIDED = Symbol('undecided');
 
 export const andK = (a, b) =>
@@ -32,12 +29,12 @@ function compileRegex(matcher) {
 
 export function matches(matcher, ctx, geo, trace = null) {
   if (!matcher || typeof matcher !== 'object') {
-    trace?.push({ kind: 'invalid', hit: false });
+    trace?.push({ type: 'invalid', hit: false });
     return false;
   }
-  switch (matcher.kind) {
+  switch (matcher.type) {
     case 'any':
-      trace?.push({ kind: 'any', hit: true });
+      trace?.push({ type: 'any', hit: true });
       return true;
     case 'geosite':
       return matchGeosite(matcher, ctx, geo, trace);
@@ -49,14 +46,14 @@ export function matches(matcher, ctx, geo, trace = null) {
       return matchUrl(matcher, ctx, trace);
     case 'ip':
       return matchIp(matcher, ctx, trace);
-    case 'all_of':
-      return matchComposite('all_of', matcher.terms, ctx, geo, trace);
-    case 'any_of':
-      return matchComposite('any_of', matcher.terms, ctx, geo, trace);
+    case 'and':
+      return matchComposite('and', matcher.matches, ctx, geo, trace);
+    case 'or':
+      return matchComposite('or', matcher.matches, ctx, geo, trace);
     case 'not':
       return matchNot(matcher, ctx, geo, trace);
     default:
-      trace?.push({ kind: matcher.kind, hit: false, note: 'unknown kind' });
+      trace?.push({ type: matcher.type, hit: false, note: 'unknown type' });
       return false;
   }
 }
@@ -66,15 +63,15 @@ function matchGeosite(matcher, ctx, geo, trace) {
   const attr = matcher.attr ? String(matcher.attr).toLowerCase() : null;
   const host = ctx?.host ?? '';
   if (!tag) {
-    trace?.push({ kind: 'geosite', tag, attr, host, hit: false, note: 'empty tag' });
+    trace?.push({ type: 'geosite', tag, attr, host, hit: false, note: 'empty tag' });
     return false;
   }
   if (!host) {
-    trace?.push({ kind: 'geosite', tag, attr, host, hit: null, note: 'empty host' });
+    trace?.push({ type: 'geosite', tag, attr, host, hit: null, note: 'empty host' });
     return UNDECIDED;
   }
   const hit = geo.inGeositeTag(host, tag, attr);
-  trace?.push({ kind: 'geosite', tag, attr, host, hit });
+  trace?.push({ type: 'geosite', tag, attr, host, hit });
   return hit;
 }
 
@@ -82,16 +79,16 @@ function matchGeoip(matcher, ctx, geo, trace) {
   const tag = String(matcher.tag ?? '').toLowerCase();
   const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
   if (!tag) {
-    trace?.push({ kind: 'geoip', tag, ips: ips.map(formatIp), hit: false, note: 'empty tag' });
+    trace?.push({ type: 'geoip', tag, ips: ips.map(formatIp), hit: false, note: 'empty tag' });
     return false;
   }
   if (ips.length === 0) {
-    trace?.push({ kind: 'geoip', tag, ips: [], hit: null, note: 'no ip resolved' });
+    trace?.push({ type: 'geoip', tag, ips: [], hit: null, note: 'no ip resolved' });
     return UNDECIDED;
   }
   const perIp = ips.map(ip => ({ ip: formatIp(ip), hit: geo.inGeoipTag(ip, tag) }));
   const hit = perIp.some(item => item.hit);
-  trace?.push({ kind: 'geoip', tag, ips: ips.map(formatIp), hit, perIp });
+  trace?.push({ type: 'geoip', tag, ips: ips.map(formatIp), hit, perIp });
   return hit;
 }
 
@@ -99,15 +96,15 @@ function matchDomain(matcher, ctx, trace) {
   const host = ctx?.host ?? '';
   const compiled = compileRegex(matcher);
   if (!compiled) {
-    trace?.push({ kind: 'domain', regex: matcher.regex, host, hit: false, note: 'invalid regex' });
+    trace?.push({ type: 'domain', regex: matcher.regex, host, hit: false, note: 'invalid regex' });
     return false;
   }
   if (!host) {
-    trace?.push({ kind: 'domain', regex: matcher.regex, host, hit: null, note: 'empty host' });
+    trace?.push({ type: 'domain', regex: matcher.regex, host, hit: null, note: 'empty host' });
     return UNDECIDED;
   }
   const hit = compiled.test(host);
-  trace?.push({ kind: 'domain', regex: matcher.regex, host, hit });
+  trace?.push({ type: 'domain', regex: matcher.regex, host, hit });
   return hit;
 }
 
@@ -115,15 +112,15 @@ function matchUrl(matcher, ctx, trace) {
   const url = ctx?.url ?? '';
   const compiled = compileRegex(matcher);
   if (!compiled) {
-    trace?.push({ kind: 'url', regex: matcher.regex, url, hit: false, note: 'invalid regex' });
+    trace?.push({ type: 'url', regex: matcher.regex, url, hit: false, note: 'invalid regex' });
     return false;
   }
   if (!url) {
-    trace?.push({ kind: 'url', regex: matcher.regex, url, hit: null, note: 'empty url' });
+    trace?.push({ type: 'url', regex: matcher.regex, url, hit: null, note: 'empty url' });
     return UNDECIDED;
   }
   const hit = compiled.test(url);
-  trace?.push({ kind: 'url', regex: matcher.regex, url, hit });
+  trace?.push({ type: 'url', regex: matcher.regex, url, hit });
   return hit;
 }
 
@@ -131,40 +128,40 @@ function matchIp(matcher, ctx, trace) {
   const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
   const cidr = parseCidr(String(matcher.cidr ?? ''));
   if (!cidr) {
-    trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit: false, note: 'invalid cidr' });
+    trace?.push({ type: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit: false, note: 'invalid cidr' });
     return false;
   }
   if (ips.length === 0) {
-    trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: [], hit: null, note: 'no ip resolved' });
+    trace?.push({ type: 'ip', cidr: matcher.cidr, ips: [], hit: null, note: 'no ip resolved' });
     return UNDECIDED;
   }
   const hit = ips.some(ip => cidr.family === ip.family && ipInCidr(ip.bytes, cidr.bytes, cidr.prefix));
-  trace?.push({ kind: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit });
+  trace?.push({ type: 'ip', cidr: matcher.cidr, ips: ips.map(formatIp), hit });
   return hit;
 }
 
-function matchComposite(kind, terms, ctx, geo, trace) {
-  if (!Array.isArray(terms) || terms.length === 0) {
-    trace?.push({ kind, hit: false, note: 'empty terms' });
+function matchComposite(type, children, ctx, geo, trace) {
+  if (!Array.isArray(children) || children.length === 0) {
+    trace?.push({ type, hit: false, note: 'empty matches' });
     return false;
   }
   const childTrace = trace ? [] : null;
-  const combine = kind === 'all_of' ? andK : orK;
-  const shortCircuit = kind === 'all_of' ? false : true;
-  let hit = kind === 'all_of' ? true : false;
-  for (const term of terms) {
-    const termHit = matches(term, ctx, geo, childTrace);
-    hit = combine(hit, termHit);
+  const combine = type === 'and' ? andK : orK;
+  const shortCircuit = type === 'and' ? false : true;
+  let hit = type === 'and' ? true : false;
+  for (const child of children) {
+    const childHit = matches(child, ctx, geo, childTrace);
+    hit = combine(hit, childHit);
     if (hit === shortCircuit && !trace) break;
   }
-  trace?.push({ kind, hit: traceValue(hit), terms: childTrace });
+  trace?.push({ type, hit: traceValue(hit), matches: childTrace });
   return hit;
 }
 
 function matchNot(matcher, ctx, geo, trace) {
   const childTrace = trace ? [] : null;
-  const hit = notK(matches(matcher.term, ctx, geo, childTrace));
-  trace?.push({ kind: 'not', hit: traceValue(hit), term: childTrace?.[0] ?? null });
+  const hit = notK(matches(matcher.match, ctx, geo, childTrace));
+  trace?.push({ type: 'not', hit: traceValue(hit), match: childTrace?.[0] ?? null });
   return hit;
 }
 

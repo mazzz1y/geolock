@@ -1,11 +1,23 @@
 import { saveBlob, loadBlobMeta } from './geo/store.js';
 import * as geo from './geo/index.js';
 import { scanCatalog } from './geo/dat-reader.js';
-import { saveConfig, loadConfig, mergeWithDefaults, validateConfig, loadRemoteSettings } from './config.js';
+import { saveConfig, loadConfig, validateConfig, loadRemoteSettings } from './config.js';
+import { migrate } from './config/migrations.js';
 
 const DAT_KEY = { geoip: 'geoip.dat', geosite: 'geosite.dat' };
 const HEARTBEAT_ALARM = 'geolock-update-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 60;
+const FETCH_TIMEOUT_MS = 30_000;
+
+export async function fetchWithTimeout(url, { timeoutMs = FETCH_TIMEOUT_MS, ...init } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { credentials: 'omit', ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const lastError = { geoip: null, geosite: null, remote: null };
 const inFlight = { geoip: null, geosite: null, remote: null };
@@ -85,7 +97,7 @@ async function runUpdateDat(kind) {
 async function downloadAndVerify(kind, source) {
   let response;
   try {
-    response = await fetch(source.url, { credentials: 'omit' });
+    response = await fetchWithTimeout(source.url);
   } catch (error) {
     lastError[kind] = String(error?.message ?? error);
     throw error;
@@ -114,7 +126,7 @@ async function downloadAndVerify(kind, source) {
 }
 
 async function fetchSha256(url) {
-  const response = await fetch(url, { credentials: 'omit' });
+  const response = await fetchWithTimeout(url);
   if (!response.ok) throw new Error(`status ${response.status}`);
   return parseSha256Sum(await response.text());
 }
@@ -126,7 +138,7 @@ function fail(kind, message) {
 
 function notifyDataChanged() {
   try { browser.runtime.sendMessage({ kind: 'event:data.changed' }).catch(() => {}); }
-  catch { /* no listeners */ }
+  catch { /* ... */ }
 }
 
 async function sha256Hex(bytes) {
@@ -149,14 +161,14 @@ async function runUpdateRemoteConfig() {
 
   notifyDataChanged();
   try {
-    const response = await fetch(remote.url, { credentials: 'omit' });
+    const response = await fetchWithTimeout(remote.url);
     if (!response.ok) throw new Error(`remote config fetch failed: ${response.status}`);
 
     let parsed;
     try { parsed = JSON.parse(await response.text()); }
     catch { throw new Error('remote config is not valid JSON'); }
 
-    const merged = mergeWithDefaults(parsed);
+    const { config: merged } = migrate(parsed);
     const validation = validateConfig(merged);
     if (!validation.ok) {
       throw new Error('remote config invalid: ' + validation.errors.map(e => `${e.path}: ${e.message}`).join('; '));

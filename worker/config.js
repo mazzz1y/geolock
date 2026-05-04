@@ -1,23 +1,14 @@
 import { parseCidr } from '../lib/ip.js';
-import { MATCHER_KINDS } from './matchers.js';
+import { CONFIG_TEMPLATE, RULE_TEMPLATES, MATCHER_TEMPLATES } from './config/templates.js';
+export { desugarRule } from './rule-shape.js';
 
 const CONFIG_KEY = 'config';
 const REMOTE_KEY = 'remote_config';
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 const ACTIONS = new Set(['allow', 'block']);
 
 export function defaultConfig() {
-  const stream = (extra = {}) => ({ url: '', auto_update: true, interval_hours: 24, ...extra });
-  return {
-    version: STORAGE_VERSION,
-    default_action: 'allow',
-    data_sources: {
-      geoip: stream({ sha256_url: '' }),
-      geosite: stream({ sha256_url: '' }),
-    },
-    dns: { cache_ttl_seconds: 300, negative_cache_ttl_seconds: 30, timeout_ms: 1500, match_strategy: 'first' },
-    rules: [],
-  };
+  return structuredClone(CONFIG_TEMPLATE);
 }
 
 export function defaultRemoteSettings() {
@@ -25,122 +16,161 @@ export function defaultRemoteSettings() {
 }
 
 export function validateConfig(input) {
-  if (!input || typeof input !== 'object') {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { ok: false, errors: [{ path: '', message: 'config must be an object' }] };
   }
   const errors = [];
-  if (input.version !== STORAGE_VERSION) {
+  if (input.version === 1) {
+    errors.push({ path: '/version', message: 'this config uses the legacy v1 schema; migrate it first' });
+  } else if (input.version !== STORAGE_VERSION) {
     errors.push({ path: '/version', message: `expected version ${STORAGE_VERSION}` });
   }
-  if (!ACTIONS.has(input.default_action)) {
-    errors.push({ path: '/default_action', message: 'must be "allow" or "block"' });
+  walkAgainstTemplate(input, CONFIG_TEMPLATE, '', errors);
+  if (Array.isArray(input.rules)) {
+    input.rules.forEach((rule, i) => walkRule(rule, `/rules/${i}`, errors));
   }
-  validateDataSources(input.data_sources, errors);
-  validateDns(input.dns, errors);
-  if (!Array.isArray(input.rules)) {
-    errors.push({ path: '/rules', message: 'must be an array' });
-  } else {
-    input.rules.forEach((rule, index) => validateRule(rule, `/rules/${index}`, errors));
-  }
+  semanticChecks(input, errors);
   return { ok: errors.length === 0, errors };
 }
 
-function validateDataSources(sources, errors) {
-  if (!sources || typeof sources !== 'object') {
-    errors.push({ path: '/data_sources', message: 'must be an object' });
+const MATCHER_KEYS = new Set(['source', 'destination', 'match']);
+
+function walkAgainstTemplate(input, template, path, errors) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    errors.push({ path, message: 'must be an object' });
     return;
   }
-  for (const key of ['geoip', 'geosite']) {
-    const path = `/data_sources/${key}`;
-    const source = sources[key];
-    if (!validateStream(source, path, errors)) continue;
-    validateOptionalHttpsUrl(source.sha256_url, `${path}/sha256_url`, errors);
+  const allowed = new Set(Object.keys(template));
+  for (const key of Object.keys(input)) {
+    if (!allowed.has(key)) {
+      errors.push({ path: `${path}/${key}`, message: 'unknown field' });
+    }
+  }
+  for (const key of Object.keys(template)) {
+    if (MATCHER_KEYS.has(key)) continue;
+    const childTemplate = template[key];
+    const childPath = `${path}/${key}`;
+    const childInput = input[key];
+    if (Array.isArray(childTemplate)) {
+      if (childInput !== undefined && !Array.isArray(childInput)) {
+        errors.push({ path: childPath, message: 'must be an array' });
+      }
+      continue;
+    }
+    if (childTemplate !== null && typeof childTemplate === 'object') {
+      if (childInput === undefined) {
+        errors.push({ path: childPath, message: 'must be an object' });
+        continue;
+      }
+      walkAgainstTemplate(childInput, childTemplate, childPath, errors);
+      continue;
+    }
+    if (childInput !== undefined && typeof childInput !== typeof childTemplate) {
+      errors.push({ path: childPath, message: `must be ${typeof childTemplate}` });
+    }
   }
 }
 
-function validateStream(stream, path, errors) {
-  if (!stream || typeof stream !== 'object') {
+function walkRule(rule, path, errors) {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
     errors.push({ path, message: 'must be an object' });
-    return false;
+    return;
   }
-  validateOptionalHttpsUrl(stream.url, `${path}/url`, errors);
-  if (typeof stream.auto_update !== 'boolean') {
-    errors.push({ path: `${path}/auto_update`, message: 'must be boolean' });
+  const isolate = rule.mode === 'isolate';
+  if (rule.mode !== undefined && rule.mode !== 'isolate') {
+    errors.push({ path: `${path}/mode`, message: 'must be "isolate" or omitted' });
+    return;
   }
-  if (!Number.isFinite(stream.interval_hours) || stream.interval_hours <= 0) {
+  walkAgainstTemplate(rule, RULE_TEMPLATES[isolate ? 'isolate' : 'flow'], path, errors);
+  if (isolate) {
+    walkMatcher(rule.match, `${path}/match`, errors);
+  } else {
+    walkMatcher(rule.source, `${path}/source`, errors);
+    walkMatcher(rule.destination, `${path}/destination`, errors);
+  }
+}
+
+function walkMatcher(matcher, path, errors) {
+  if (!matcher || typeof matcher !== 'object' || Array.isArray(matcher)) {
+    errors.push({ path, message: 'must be an object' });
+    return;
+  }
+  const template = MATCHER_TEMPLATES[matcher.type];
+  if (!template) {
+    errors.push({ path: `${path}/type`, message: `must be one of ${Object.keys(MATCHER_TEMPLATES).join(', ')}` });
+    return;
+  }
+  walkAgainstTemplate(matcher, template, path, errors);
+  if (matcher.type === 'and' || matcher.type === 'or') {
+    if (Array.isArray(matcher.matches)) {
+      matcher.matches.forEach((term, i) => walkMatcher(term, `${path}/matches/${i}`, errors));
+    }
+  } else if (matcher.type === 'not') {
+    if (matcher.match !== undefined) walkMatcher(matcher.match, `${path}/match`, errors);
+  }
+}
+
+function semanticChecks(input, errors) {
+  if (input.default_action !== undefined && !ACTIONS.has(input.default_action)) {
+    errors.push({ path: '/default_action', message: 'must be "allow" or "block"' });
+  }
+  if (input.dns && typeof input.dns === 'object' && !Array.isArray(input.dns)) {
+    checkIntRange(input.dns.cache_ttl_seconds, '/dns/cache_ttl_seconds', 0, 86400, errors);
+    checkIntRange(input.dns.negative_cache_ttl_seconds, '/dns/negative_cache_ttl_seconds', 0, 3600, errors);
+    checkIntRange(input.dns.timeout_ms, '/dns/timeout_ms', 50, 30000, errors);
+    if (input.dns.match_strategy !== undefined && input.dns.match_strategy !== 'first' && input.dns.match_strategy !== 'all') {
+      errors.push({ path: '/dns/match_strategy', message: "must be 'first' or 'all'" });
+    }
+  }
+  if (input.data_sources && typeof input.data_sources === 'object' && !Array.isArray(input.data_sources)) {
+    for (const k of ['geoip', 'geosite']) {
+      const stream = input.data_sources[k];
+      if (stream && typeof stream === 'object' && !Array.isArray(stream)) {
+        semanticStream(stream, `/data_sources/${k}`, errors);
+      }
+    }
+  }
+  if (Array.isArray(input.rules)) {
+    input.rules.forEach((rule, i) => semanticRule(rule, `/rules/${i}`, errors));
+  }
+}
+
+function semanticStream(stream, path, errors) {
+  if (stream.url !== undefined && typeof stream.url === 'string' && stream.url && !isHttpsUrl(stream.url)) {
+    errors.push({ path: `${path}/url`, message: 'must be an https URL or empty' });
+  }
+  if (stream.sha256_url !== undefined && typeof stream.sha256_url === 'string' && stream.sha256_url && !isHttpsUrl(stream.sha256_url)) {
+    errors.push({ path: `${path}/sha256_url`, message: 'must be an https URL or empty' });
+  }
+  if (stream.interval_hours !== undefined && (!Number.isFinite(stream.interval_hours) || stream.interval_hours <= 0)) {
     errors.push({ path: `${path}/interval_hours`, message: 'must be a positive number' });
   }
-  return true;
 }
 
-function validateDns(dns, errors) {
-  if (!dns || typeof dns !== 'object') {
-    errors.push({ path: '/dns', message: 'must be an object' });
-    return;
-  }
-  validateIntRange(dns.cache_ttl_seconds, '/dns/cache_ttl_seconds', 0, 86400, errors);
-  validateIntRange(dns.negative_cache_ttl_seconds, '/dns/negative_cache_ttl_seconds', 0, 3600, errors);
-  validateIntRange(dns.timeout_ms, '/dns/timeout_ms', 50, 30000, errors);
-  if (dns.match_strategy !== 'first' && dns.match_strategy !== 'all') {
-    errors.push({ path: '/dns/match_strategy', message: "must be 'first' or 'all'" });
-  }
-}
-
-function validateIntRange(value, path, min, max, errors) {
-  if (!Number.isInteger(value) || value < min || value > max) {
-    errors.push({ path, message: `must be an integer in [${min}, ${max}]` });
-  }
-}
-
-function validateOptionalHttpsUrl(value, path, errors) {
-  if (typeof value !== 'string') {
-    errors.push({ path, message: 'must be a string' });
-  } else if (value && !isHttpsUrl(value)) {
-    errors.push({ path, message: 'must be an https URL or empty' });
-  }
-}
-
-function validateRule(rule, path, errors) {
-  if (!rule || typeof rule !== 'object') {
-    errors.push({ path, message: 'must be an object' });
-    return;
-  }
-  if (typeof rule.enabled !== 'boolean') {
-    errors.push({ path: `${path}/enabled`, message: 'must be boolean' });
-  }
-  if (!ACTIONS.has(rule.action)) {
+function semanticRule(rule, path, errors) {
+  if (!rule || typeof rule !== 'object') return;
+  if (rule.action !== undefined && !ACTIONS.has(rule.action)) {
     errors.push({ path: `${path}/action`, message: 'must be "allow" or "block"' });
   }
-  if (rule.bidirectional !== undefined && typeof rule.bidirectional !== 'boolean') {
-    errors.push({ path: `${path}/bidirectional`, message: 'must be boolean' });
+  if (rule.strip_referrer === true && rule.action !== 'block') {
+    errors.push({ path: `${path}/strip_referrer`, message: 'requires action: block' });
   }
-  if (rule.strip_referrer_on_navigation !== undefined && typeof rule.strip_referrer_on_navigation !== 'boolean') {
-    errors.push({ path: `${path}/strip_referrer_on_navigation`, message: 'must be boolean' });
+  if (rule.mode === 'isolate') {
+    semanticMatcher(rule.match, `${path}/match`, errors);
+  } else if (rule.mode === undefined) {
+    semanticMatcher(rule.source, `${path}/source`, errors);
+    semanticMatcher(rule.destination, `${path}/destination`, errors);
   }
-  validateMatcher(rule.website, `${path}/website`, errors);
-  validateMatcher(rule.resource, `${path}/resource`, errors);
 }
 
-function validateMatcher(matcher, path, errors) {
-  if (!matcher || typeof matcher !== 'object') {
-    errors.push({ path, message: 'must be an object' });
-    return;
-  }
-  if (!MATCHER_KINDS.includes(matcher.kind)) {
-    errors.push({ path: `${path}/kind`, message: `must be one of ${MATCHER_KINDS.join(', ')}` });
-    return;
-  }
-  switch (matcher.kind) {
-    case 'any':
-      break;
+function semanticMatcher(matcher, path, errors) {
+  if (!matcher || typeof matcher !== 'object') return;
+  switch (matcher.type) {
     case 'geosite':
-      requireString(matcher.tag, `${path}/tag`, errors);
-      if (matcher.attr != null && typeof matcher.attr !== 'string') {
-        errors.push({ path: `${path}/attr`, message: 'must be a string or null' });
-      }
-      break;
     case 'geoip':
-      requireString(matcher.tag, `${path}/tag`, errors);
+      if (typeof matcher.tag !== 'string' || !matcher.tag) {
+        errors.push({ path: `${path}/tag`, message: 'must be a non-empty string' });
+      }
       break;
     case 'domain':
     case 'url':
@@ -156,23 +186,24 @@ function validateMatcher(matcher, path, errors) {
         errors.push({ path: `${path}/cidr`, message: 'must be a valid IPv4/IPv6 CIDR' });
       }
       break;
-    case 'all_of':
-    case 'any_of':
-      if (!Array.isArray(matcher.terms) || matcher.terms.length === 0) {
-        errors.push({ path: `${path}/terms`, message: 'must be a non-empty array' });
+    case 'and':
+    case 'or':
+      if (!Array.isArray(matcher.matches) || matcher.matches.length === 0) {
+        errors.push({ path: `${path}/matches`, message: 'must be a non-empty array' });
       } else {
-        matcher.terms.forEach((term, index) => validateMatcher(term, `${path}/terms/${index}`, errors));
+        matcher.matches.forEach((term, i) => semanticMatcher(term, `${path}/matches/${i}`, errors));
       }
       break;
     case 'not':
-      validateMatcher(matcher.term, `${path}/term`, errors);
+      if (matcher.match !== undefined) semanticMatcher(matcher.match, `${path}/match`, errors);
       break;
   }
 }
 
-function requireString(value, path, errors) {
-  if (typeof value !== 'string' || !value) {
-    errors.push({ path, message: 'must be a non-empty string' });
+function checkIntRange(value, path, min, max, errors) {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || value < min || value > max) {
+    errors.push({ path, message: `must be an integer in [${min}, ${max}]` });
   }
 }
 
@@ -182,6 +213,8 @@ function isHttpsUrl(text) {
 }
 
 export async function loadConfig() {
+  const { isLegacyV1Config } = await import('./config/v1.js');
+  const { migrate } = await import('./config/migrations.js');
   const stored = await browser.storage.local.get(CONFIG_KEY);
   const candidate = stored?.[CONFIG_KEY];
   if (!candidate) {
@@ -189,7 +222,20 @@ export async function loadConfig() {
     await browser.storage.local.set({ [CONFIG_KEY]: fresh });
     return fresh;
   }
-  return mergeWithDefaults(candidate);
+  if (isLegacyV1Config(candidate)) {
+    const { config } = migrate(candidate);
+    await browser.storage.local.set({ [CONFIG_KEY]: config });
+    return config;
+  }
+  const merged = mergeWithDefaults(candidate);
+  const validation = validateConfig(merged);
+  if (!validation.ok) {
+    console.warn('GeoLock: stored config failed validation', validation.errors);
+  }
+  if (candidate.version !== STORAGE_VERSION) {
+    await browser.storage.local.set({ [CONFIG_KEY]: merged });
+  }
+  return merged;
 }
 
 export async function saveConfig(config) {
@@ -205,7 +251,22 @@ export async function saveConfig(config) {
 
 export function validateRemoteSettings(input) {
   const errors = [];
-  validateStream(input, '', errors);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    errors.push({ path: '', message: 'must be an object' });
+    return { ok: false, errors };
+  }
+  if (input.url !== undefined && typeof input.url === 'string' && input.url && !isHttpsUrl(input.url)) {
+    errors.push({ path: '/url', message: 'must be an https URL or empty' });
+  }
+  if (input.url !== undefined && typeof input.url !== 'string') {
+    errors.push({ path: '/url', message: 'must be a string' });
+  }
+  if (input.auto_update !== undefined && typeof input.auto_update !== 'boolean') {
+    errors.push({ path: '/auto_update', message: 'must be boolean' });
+  }
+  if (input.interval_hours !== undefined && (!Number.isFinite(input.interval_hours) || input.interval_hours <= 0)) {
+    errors.push({ path: '/interval_hours', message: 'must be a positive number' });
+  }
   return { ok: errors.length === 0, errors };
 }
 
@@ -243,13 +304,20 @@ export function mergeWithDefaults(partial) {
 }
 
 function normalizeRule(rule) {
-  return {
-    name: typeof rule?.name === 'string' ? rule.name : '',
-    enabled: rule?.enabled !== false,
-    bidirectional: rule?.bidirectional === true,
-    strip_referrer_on_navigation: rule?.strip_referrer_on_navigation === true,
-    website: rule?.website ? structuredClone(rule.website) : { kind: 'any' },
-    resource: rule?.resource ? structuredClone(rule.resource) : { kind: 'any' },
-    action: ACTIONS.has(rule?.action) ? rule.action : 'block',
-  };
+  const isolate = rule?.mode === 'isolate';
+  const template = RULE_TEMPLATES[isolate ? 'isolate' : 'flow'];
+  const result = structuredClone(template);
+  if (!rule || typeof rule !== 'object') return result;
+  if (typeof rule.name === 'string') result.name = rule.name;
+  result.enabled = rule.enabled !== false;
+  if (ACTIONS.has(rule.action)) result.action = rule.action;
+  result.strip_referrer = rule.strip_referrer === true;
+  if (isolate) {
+    if (rule.match && typeof rule.match === 'object') result.match = structuredClone(rule.match);
+  } else {
+    result.bidirectional = rule.bidirectional === true;
+    if (rule.source && typeof rule.source === 'object') result.source = structuredClone(rule.source);
+    if (rule.destination && typeof rule.destination === 'object') result.destination = structuredClone(rule.destination);
+  }
+  return result;
 }

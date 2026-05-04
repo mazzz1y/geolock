@@ -1,0 +1,5 @@
+- Schema renamed to v2. v1 configs migrate automatically on first launch.
+- New "isolate" rule shape blocks or allows traffic that crosses a boundary in either direction (fires when source XOR destination is in the match)
+- Faster strip-referrer handling via verdict cache between request passes
+- Tester improvements
+- Network fetches now time out after 30s instead of hanging on unresponsive URLs

@@ -13,13 +13,14 @@ height="54">](https://addons.mozilla.org/firefox/addon/84ec3815000144658945/)
 
 ## Features
 
-You write rules that combine a **website** (the page the user is on) with a **resource** (what that page is loading), and decide whether to allow or block.
+You write rules that combine a **source** (the page making the request) with a **destination** (what that page is loading), and decide whether to allow or block.
 
 ![GeoLock options page](.github/screenshot.png)
 
-- Per-website rules: match on both the page and the resource it loads
-- Matcher types: geosite category, geoip country, domain regex, IP CIDR, composites (`all_of`, `any_of`, `not`)
-- Bidirectional rules, fire in both website↔resource directions
+- Per-page rules: match on both the source and the destination it loads
+- Matcher types: geosite category, geoip country, domain regex, IP CIDR, composites (`and`, `or`, `not`)
+- Bidirectional rules, fire in both source↔destination directions
+- Isolate rules: fire when traffic crosses a boundary (source XOR destination is in a set)
 - v2fly geoip.dat and geosite.dat support
 - Remote configuration
 - In-memory LRU DNS cache
@@ -29,25 +30,34 @@ You write rules that combine a **website** (the page the user is on) with a **re
 **Example rules:**
 - Block any cross-border resource: when on a US site, block non-US IP.
 - Allow only known CDNs when browsing a sensitive site.
+- Block any cross-US traffic in either direction with one isolate rule.
 
-## What it does
+## How it works
 
-Every sub-resource request a page makes (images, scripts, API calls, fonts, etc.) is evaluated against your rules in order. The first rule that matches decides the outcome. If no rule matches, the configured default action applies.
+Every time a page loads something — an image, a script, a tracking pixel, an API call — GeoLock checks your rules and decides whether to let it through or stop it.
 
-**A rule has two sides and an action:**
-- **Website matcher** — describes the page the user is on.
-- **Resource matcher** — describes what that page is trying to load.
-- **Action** — `allow` or `block`.
+Each rule answers two questions: **which page is making the request?** and **where is the request going?** If both sides match what you described, the rule fires and applies its action (allow or block). If no rule matches, GeoLock falls back to your default action.
 
-Both sides must match for the rule to fire. Rules can also be made **bidirectional**: they match even when the website and resource roles are swapped.
+Rules can be **bidirectional**, meaning they fire whether the page-and-resource pair appears in the order you wrote it or the reverse. Useful for symmetric "no traffic between X and Y" policies.
 
-**Matcher types:**
-- `geosite` — matches a v2fly geosite category (e.g. `google`, `category-ads-all`). Optionally scoped to an attribute (e.g. `google@ads` for Google's Ads domains).
-- `geoip` — matches by the resolved IP country using v2fly geoip data.
-- `domain` — matches the hostname against a regular expression.
-- `ip` — matches the resolved IP against a CIDR range (IPv4 or IPv6).
-- `any` — always matches.
-- `all_of`, `any_of`, `not` — compose the above.
+There are also **isolate rules** for a common pattern: keep two worlds apart. You define a single boundary (say, "anything in the US"), and the rule fires whenever traffic crosses it — exactly one side of the request is inside, the other is outside. One short rule replaces two bidirectional rules with NOT.
+
+To describe the originating page or the request target, you pick a **matcher**:
+- match by country (resolved IP geolocation)
+- match by category (v2fly geosite tags like `google`, `category-ads-all`)
+- match by domain pattern (regex against the hostname)
+- match by URL pattern (regex against the full URL)
+- match by IP range (CIDR, IPv4 or IPv6)
+- match anything
+- combine the above with **and**, **or**, **not**
+
+Rules are evaluated in order, top to bottom. The first one that matches wins — so put your specific exceptions above your broad blocks.
+
+## Configuration
+
+The actual config schema is documented in [`docs/config/v2.md`](docs/config/v2.md).
+
+Legacy v1 configs (shipped through GeoLock 1.4.x) are documented in [`docs/config/v1.md`](docs/config/v1.md) and are migrated to v2 automatically on extension start and on import.
 
 ## Known issues
 

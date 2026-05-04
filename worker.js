@@ -1,4 +1,5 @@
-import { loadConfig, saveConfig, validateConfig, defaultConfig, mergeWithDefaults, loadRemoteSettings, saveRemoteSettings, validateRemoteSettings } from './worker/config.js';
+import { loadConfig, saveConfig, validateConfig, defaultConfig, loadRemoteSettings, saveRemoteSettings, validateRemoteSettings } from './worker/config.js';
+import { migrate } from './worker/config/migrations.js';
 import * as enforcer from './worker/enforcer.js';
 import * as updater from './worker/updater.js';
 import * as geo from './worker/geo/index.js';
@@ -72,34 +73,41 @@ browser.tabs.onRemoved.addListener(async tabId => {
   if (flush) await flush;
 });
 
+browser.webNavigation.onErrorOccurred.addListener(async ({ tabId, frameId, url }) => {
+  if (frameId !== 0) return;
+  const flush = blockLog.dropMainFrameForUrl(tabId, url);
+  if (flush) {
+    badge.updateBadge(tabId);
+    await flush;
+  }
+});
+
+function normalizeIncomingConfig(input) {
+  return migrate(input ?? {}).config;
+}
+
 const handlers = {
   ping: () => ({ ok: true, version: browser.runtime.getManifest().version }),
 
   'config.get': async () => ({ ok: true, config: await loadConfig() }),
 
   'config.save': async ({ config }) => {
-    const merged = mergeWithDefaults(config);
-    const validation = validateConfig(merged);
+    const normalized = normalizeIncomingConfig(config);
+    const validation = validateConfig(normalized);
     if (!validation.ok) return { ok: false, errors: validation.errors };
-    const saved = await saveConfig(merged);
-    enforcer.setConfig(saved);
-    applyDnsConfig(saved.dns);
-    geo.flushWebRequestCache();
+    const saved = await saveConfig(normalized);
     return { ok: true, config: saved };
   },
 
   'config.reset': async () => {
     const fresh = defaultConfig();
     await saveConfig(fresh);
-    enforcer.setConfig(fresh);
-    applyDnsConfig(fresh.dns);
-    geo.flushWebRequestCache();
     return { ok: true, config: fresh };
   },
 
   'config.validate': ({ config }) => {
-    const merged = mergeWithDefaults(config);
-    return { ok: true, validation: validateConfig(merged), normalized: merged };
+    const normalized = normalizeIncomingConfig(config);
+    return { ok: true, validation: validateConfig(normalized), normalized };
   },
 
   'remote.get': async () => ({ ok: true, settings: await loadRemoteSettings() }),
@@ -158,9 +166,9 @@ const handlers = {
     return { ok: true, entries: blockLog.getForTab(tabId) };
   },
 
-  'tester.evaluate': async ({ websiteUrl, resourceUrl, resourceIp }) => {
+  'tester.evaluate': async ({ sourceUrl, destinationUrl, destinationIp }) => {
     try {
-      const result = await enforcer.probe({ websiteUrl, resourceUrl, resourceIp });
+      const result = await enforcer.probe({ sourceUrl, destinationUrl, destinationIp });
       return { ok: true, result };
     } catch (error) {
       return { ok: false, error: String(error.message ?? error) };

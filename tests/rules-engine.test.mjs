@@ -9,13 +9,13 @@ const geo = {
     return false;
   },
   inGeositeTag(host, tag) {
-    if (tag === 'google' && host.endsWith('google.com')) return true;
+    if (tag === 'google' && host.endsWith('search.example')) return true;
     return false;
   },
 };
 
 function preResolved() {
-  return { resolveWebsite: async () => {}, resolveResource: async () => {} };
+  return { resolveSource: async () => {}, resolveDestination: async () => {} };
 }
 
 export const tests = [
@@ -23,8 +23,8 @@ export const tests = [
     name: 'falls back to default when no rules',
     run: async () => {
       const result = await evaluate({ default_action: 'allow', rules: [] }, {
-        website: { host: 'a.com' },
-        resource: { host: 'b.com' },
+        source: { host: 'a.com' },
+        destination: { host: 'b.com' },
       }, geo);
       assert.equal(result.verdict, 'allow');
       assert.equal(result.matchedRule, null);
@@ -37,14 +37,14 @@ export const tests = [
         default_action: 'allow',
         rules: [{
           enabled: true,
-          website: { kind: 'geosite', tag: 'google' },
-          resource: { kind: 'geoip', tag: 'cn' },
+          source: { type: 'geosite', tag: 'google' },
+          destination: { type: 'geoip', tag: 'cn' },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'mail.google.com' },
-        resource: { host: 'cdn', ips: [parseIp('1.1.1.1')] },
+        source: { host: 'mail.search.example' },
+        destination: { host: 'cdn', ips: [parseIp('1.1.1.1')] },
       }, geo, preResolved());
       assert.equal(result.verdict, 'block');
       assert.equal(result.matchedRule.index, 0);
@@ -57,14 +57,14 @@ export const tests = [
         default_action: 'block',
         rules: [{
           enabled: true,
-          website: { kind: 'any' },
-          resource: { kind: 'domain', regex: 'safe' },
+          source: { type: 'any' },
+          destination: { type: 'domain', regex: 'safe' },
           action: 'allow',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' },
-        resource: { host: 'safe.example' },
+        source: { host: 'a' },
+        destination: { host: 'safe.example' },
       }, geo);
       assert.equal(result.verdict, 'allow');
     },
@@ -75,12 +75,12 @@ export const tests = [
       const config = {
         default_action: 'allow',
         rules: [
-          { enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' },
-          { enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'allow' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'allow' },
         ],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' }, resource: { host: 'b' },
+        source: { host: 'a' }, destination: { host: 'b' },
       }, geo);
       assert.equal(result.matchedRule.index, 0);
     },
@@ -90,9 +90,9 @@ export const tests = [
     run: async () => {
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: false, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+        rules: [{ enabled: false, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
       };
-      const result = await evaluate(config, { website: { host: 'a' }, resource: { host: 'b' } }, geo);
+      const result = await evaluate(config, { source: { host: 'a' }, destination: { host: 'b' } }, geo);
       assert.equal(result.verdict, 'allow');
     },
   },
@@ -102,128 +102,128 @@ export const tests = [
       const config = {
         default_action: 'allow',
         rules: [
-          { enabled: true, website: { kind: 'geosite', tag: 'google' }, resource: { kind: 'any' }, action: 'block' },
+          { enabled: true, source: { type: 'geosite', tag: 'google' }, destination: { type: 'any' }, action: 'block' },
         ],
       };
-      const result = await evaluate(config, { website: { host: 'example.com' }, resource: { host: 'r' } }, geo, {}, { trace: true });
+      const result = await evaluate(config, { source: { host: 'example.com' }, destination: { host: 'r' } }, geo, {}, { trace: true });
       assert.equal(result.trace.length, 1);
-      assert.equal(result.trace[0].websiteHit, false);
-      assert.equal(result.trace[0].resourceHit, null);
+      assert.equal(result.trace[0].sourceHit, false);
+      assert.equal(result.trace[0].destinationHit, null);
     },
   },
   {
     name: 'lazy: geosite-only config never calls resolvers',
     run: async () => {
-      let websiteCalls = 0;
-      let resourceCalls = 0;
+      let sourceCalls = 0;
+      let destinationCalls = 0;
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'geosite', tag: 'google' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'geosite', tag: 'google' }, action: 'block' }],
       };
       const result = await evaluate(config, {
-        website: { host: 'site' }, resource: { host: 'mail.google.com' },
+        source: { host: 'site' }, destination: { host: 'mail.search.example' },
       }, geo, {
-        resolveWebsite: async () => { websiteCalls += 1; },
-        resolveResource: async () => { resourceCalls += 1; },
+        resolveSource: async () => { sourceCalls += 1; },
+        resolveDestination: async () => { destinationCalls += 1; },
       });
       assert.equal(result.verdict, 'block');
-      assert.equal(websiteCalls, 0);
-      assert.equal(resourceCalls, 0);
+      assert.equal(sourceCalls, 0);
+      assert.equal(destinationCalls, 0);
     },
   },
   {
-    name: 'lazy: geoip rule reached triggers resource resolver',
+    name: 'lazy: geoip rule reached triggers destination resolver',
     run: async () => {
-      let resourceCalls = 0;
+      let destinationCalls = 0;
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'geoip', tag: 'cn' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'geoip', tag: 'cn' }, action: 'block' }],
       };
-      const ctx = { website: { host: 'a' }, resource: { host: 'cdn', ips: [] } };
+      const ctx = { source: { host: 'a' }, destination: { host: 'cdn', ips: [] } };
       const result = await evaluate(config, ctx, geo, {
-        resolveResource: async c => { resourceCalls += 1; c.ips = [parseIp('1.1.1.1')]; },
+        resolveDestination: async c => { destinationCalls += 1; c.ips = [parseIp('1.1.1.1')]; },
       });
       assert.equal(result.verdict, 'block');
-      assert.equal(resourceCalls, 1);
+      assert.equal(destinationCalls, 1);
     },
   },
   {
     name: 'lazy: earlier geosite hit prevents later geoip resolution',
     run: async () => {
-      let resourceCalls = 0;
+      let destinationCalls = 0;
       const config = {
         default_action: 'allow',
         rules: [
-          { enabled: true, website: { kind: 'any' }, resource: { kind: 'geosite', tag: 'google' }, action: 'block' },
-          { enabled: true, website: { kind: 'any' }, resource: { kind: 'geoip', tag: 'cn' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'geosite', tag: 'google' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'geoip', tag: 'cn' }, action: 'block' },
         ],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' }, resource: { host: 'mail.google.com' },
+        source: { host: 'a' }, destination: { host: 'mail.search.example' },
       }, geo, {
-        resolveResource: async c => { resourceCalls += 1; c.ips = [parseIp('1.1.1.1')]; },
+        resolveDestination: async c => { destinationCalls += 1; c.ips = [parseIp('1.1.1.1')]; },
       });
       assert.equal(result.verdict, 'block');
-      assert.equal(resourceCalls, 0);
+      assert.equal(destinationCalls, 0);
     },
   },
   {
-    name: 'lazy: multiple geoip rules resolve resource only once',
+    name: 'lazy: multiple geoip rules resolve destination only once',
     run: async () => {
-      let resourceCalls = 0;
+      let destinationCalls = 0;
       const config = {
         default_action: 'allow',
         rules: [
-          { enabled: true, website: { kind: 'any' }, resource: { kind: 'geoip', tag: 'us' }, action: 'block' },
-          { enabled: true, website: { kind: 'any' }, resource: { kind: 'geoip', tag: 'cn' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'geoip', tag: 'us' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'geoip', tag: 'cn' }, action: 'block' },
         ],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' }, resource: { host: 'cdn', ips: [] },
+        source: { host: 'a' }, destination: { host: 'cdn', ips: [] },
       }, geo, {
-        resolveResource: async c => { resourceCalls += 1; c.ips = [parseIp('1.1.1.1')]; },
+        resolveDestination: async c => { destinationCalls += 1; c.ips = [parseIp('1.1.1.1')]; },
       });
       assert.equal(result.verdict, 'block');
-      assert.equal(resourceCalls, 1);
+      assert.equal(destinationCalls, 1);
     },
   },
   {
     name: 'lazy: not-geoip triggers resolver',
     run: async () => {
-      let websiteCalls = 0;
+      let sourceCalls = 0;
       const config = {
         default_action: 'allow',
         rules: [{
           enabled: true,
-          website: { kind: 'not', term: { kind: 'geoip', tag: 'cn' } },
-          resource: { kind: 'any' },
+          source: { type: 'not', match: { type: 'geoip', tag: 'cn' } },
+          destination: { type: 'any' },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'a', ips: [] }, resource: { host: 'b' },
+        source: { host: 'a', ips: [] }, destination: { host: 'b' },
       }, geo, {
-        resolveWebsite: async c => { websiteCalls += 1; c.ips = [parseIp('8.8.8.8')]; },
+        resolveSource: async c => { sourceCalls += 1; c.ips = [parseIp('8.8.8.8')]; },
       });
       assert.equal(result.verdict, 'block');
-      assert.equal(websiteCalls, 1);
+      assert.equal(sourceCalls, 1);
     },
   },
   {
     name: 'lazy: disabled geoip rule does not trigger resolver',
     run: async () => {
-      let resourceCalls = 0;
+      let destinationCalls = 0;
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: false, website: { kind: 'any' }, resource: { kind: 'geoip', tag: 'cn' }, action: 'block' }],
+        rules: [{ enabled: false, source: { type: 'any' }, destination: { type: 'geoip', tag: 'cn' }, action: 'block' }],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' }, resource: { host: 'cdn' },
+        source: { host: 'a' }, destination: { host: 'cdn' },
       }, geo, {
-        resolveResource: async () => { resourceCalls += 1; },
+        resolveDestination: async () => { destinationCalls += 1; },
       });
       assert.equal(result.verdict, 'allow');
-      assert.equal(resourceCalls, 0);
+      assert.equal(destinationCalls, 0);
     },
   },
   {
@@ -234,14 +234,14 @@ export const tests = [
         rules: [{
           enabled: true,
           bidirectional: true,
-          website: { kind: 'geosite', tag: 'google' },
-          resource: { kind: 'geoip', tag: 'cn' },
+          source: { type: 'geosite', tag: 'google' },
+          destination: { type: 'geoip', tag: 'cn' },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'mail.google.com' },
-        resource: { host: 'cdn', ips: [parseIp('1.1.1.1')] },
+        source: { host: 'mail.search.example' },
+        destination: { host: 'cdn', ips: [parseIp('1.1.1.1')] },
       }, geo, preResolved());
       assert.equal(result.verdict, 'block');
       assert.equal(result.matchedRule.direction, 'forward');
@@ -255,21 +255,21 @@ export const tests = [
         rules: [{
           enabled: true,
           bidirectional: true,
-          website: { kind: 'geosite', tag: 'google' },
-          resource: { kind: 'geoip', tag: 'cn' },
+          source: { type: 'geosite', tag: 'google' },
+          destination: { type: 'geoip', tag: 'cn' },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'qq.com', ips: [parseIp('1.1.1.1')] },
-        resource: { host: 'mail.google.com' },
+        source: { host: 'chat.example', ips: [parseIp('1.1.1.1')] },
+        destination: { host: 'mail.search.example' },
       }, geo, preResolved());
       assert.equal(result.verdict, 'block');
       assert.equal(result.matchedRule.direction, 'reverse');
     },
   },
   {
-    name: 'bidirectional NOT does not fire when website host empty (peel reproducer)',
+    name: 'bidirectional NOT does not fire when source host empty (peel reproducer)',
     run: async () => {
       const config = {
         default_action: 'allow',
@@ -277,14 +277,14 @@ export const tests = [
           enabled: true,
           bidirectional: true,
           name: 'RU',
-          website: { kind: 'geosite', tag: 'google' },
-          resource: { kind: 'not', term: { kind: 'geosite', tag: 'google' } },
+          source: { type: 'geosite', tag: 'google' },
+          destination: { type: 'not', match: { type: 'geosite', tag: 'google' } },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: '', url: '', ips: [] },
-        resource: { host: 'mail.google.com', url: 'https://mail.google.com/', ips: [] },
+        source: { host: '', url: '', ips: [] },
+        destination: { host: 'mail.search.example', url: 'https://mail.search.example/', ips: [] },
       }, geo, preResolved());
       assert.equal(result.verdict, 'allow');
       assert.equal(result.matchedRule, null);
@@ -297,14 +297,14 @@ export const tests = [
         default_action: 'allow',
         rules: [{
           enabled: true,
-          website: { kind: 'any' },
-          resource: { kind: 'not', term: { kind: 'geoip', tag: 'cn' } },
+          source: { type: 'any' },
+          destination: { type: 'not', match: { type: 'geoip', tag: 'cn' } },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' },
-        resource: { host: 'b', ips: [] },
+        source: { host: 'a' },
+        destination: { host: 'b', ips: [] },
       }, geo, preResolved());
       assert.equal(result.verdict, 'allow');
       assert.equal(result.matchedRule, null);
@@ -317,57 +317,137 @@ export const tests = [
         default_action: 'allow',
         rules: [{
           enabled: true,
-          website: { kind: 'any' },
-          resource: { kind: 'not', term: { kind: 'geosite', tag: 'google' } },
+          source: { type: 'any' },
+          destination: { type: 'not', match: { type: 'geosite', tag: 'google' } },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: 'a' },
-        resource: { host: 'example.com' },
+        source: { host: 'a' },
+        destination: { host: 'example.com' },
       }, geo, preResolved());
       assert.equal(result.verdict, 'block');
     },
   },
   {
-    name: 'rule fires when only resource side has data',
+    name: 'rule fires when only destination side has data',
     run: async () => {
       const config = {
         default_action: 'allow',
         rules: [{
           enabled: true,
-          website: { kind: 'any' },
-          resource: { kind: 'geosite', tag: 'google' },
+          source: { type: 'any' },
+          destination: { type: 'geosite', tag: 'google' },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: '' },
-        resource: { host: 'mail.google.com' },
+        source: { host: '' },
+        destination: { host: 'mail.search.example' },
       }, geo, preResolved());
       assert.equal(result.verdict, 'block');
     },
   },
   {
-    name: 'trace: UNDECIDED website yields null hits and no resource subtree',
+    name: 'trace: UNDECIDED source yields null hits and no destination subtree',
     run: async () => {
       const config = {
         default_action: 'allow',
         rules: [{
           enabled: true,
-          website: { kind: 'geosite', tag: 'google' },
-          resource: { kind: 'any' },
+          source: { type: 'geosite', tag: 'google' },
+          destination: { type: 'any' },
           action: 'block',
         }],
       };
       const result = await evaluate(config, {
-        website: { host: '' },
-        resource: { host: 'b' },
+        source: { host: '' },
+        destination: { host: 'b' },
       }, geo, preResolved(), { trace: true });
       assert.equal(result.trace.length, 1);
-      assert.equal(result.trace[0].websiteHit, null);
-      assert.equal(result.trace[0].resourceHit, null);
-      assert.equal(result.trace[0].resourceTrace, null);
+      assert.equal(result.trace[0].sourceHit, null);
+      assert.equal(result.trace[0].destinationHit, null);
+      assert.equal(result.trace[0].destinationTrace, null);
+    },
+  },
+  {
+    name: 'isolate fires when source in set, destination out of set',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          mode: 'isolate',
+          match: { type: 'geosite', tag: 'google' },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        source: { host: 'mail.search.example' },
+        destination: { host: 'example.com' },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'block');
+      assert.equal(result.matchedRule.index, 0);
+    },
+  },
+  {
+    name: 'isolate fires when destination in set, source out of set (reverse)',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          mode: 'isolate',
+          match: { type: 'geosite', tag: 'google' },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        source: { host: 'example.com' },
+        destination: { host: 'mail.search.example' },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'block');
+      assert.equal(result.matchedRule.direction, 'reverse');
+    },
+  },
+  {
+    name: 'isolate does NOT fire when both sides in set',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          mode: 'isolate',
+          match: { type: 'geosite', tag: 'google' },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        source: { host: 'mail.search.example' },
+        destination: { host: 'docs.search.example' },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'allow');
+      assert.equal(result.matchedRule, null);
+    },
+  },
+  {
+    name: 'isolate does NOT fire when neither side in set',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        rules: [{
+          enabled: true,
+          mode: 'isolate',
+          match: { type: 'geosite', tag: 'google' },
+          action: 'block',
+        }],
+      };
+      const result = await evaluate(config, {
+        source: { host: 'a.example' },
+        destination: { host: 'b.example' },
+      }, geo, preResolved());
+      assert.equal(result.verdict, 'allow');
+      assert.equal(result.matchedRule, null);
     },
   },
 ];

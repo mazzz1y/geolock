@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { normalizeMatcher, serializeMatcher, convertKind } from '../data/options/matcher-tree.js';
+import { normalizeMatcher, serializeMatcher, convertType } from '../data/options/matcher-tree.js';
 import { validateConfig, defaultConfig } from '../worker/config.js';
 
 function roundtrip(matcher) {
@@ -10,15 +10,15 @@ export const tests = [
   {
     name: 'leaf any roundtrip',
     run: () => {
-      assert.deepEqual(roundtrip({ kind: 'any' }), { kind: 'any' });
+      assert.deepEqual(roundtrip({ type: 'any' }), { type: 'any' });
     },
   },
   {
     name: 'leaf geosite with attr roundtrip',
     run: () => {
       assert.deepEqual(
-        roundtrip({ kind: 'geosite', tag: 'GOOGLE', attr: 'ads' }),
-        { kind: 'geosite', tag: 'GOOGLE', attr: 'ads' },
+        roundtrip({ type: 'geosite', tag: 'GOOGLE', attr: 'ads' }),
+        { type: 'geosite', tag: 'GOOGLE', attr: 'ads' },
       );
     },
   },
@@ -26,124 +26,124 @@ export const tests = [
     name: 'leaf url roundtrip',
     run: () => {
       assert.deepEqual(
-        roundtrip({ kind: 'url', regex: '^https://example\\.com/api/' }),
-        { kind: 'url', regex: '^https://example\\.com/api/' },
+        roundtrip({ type: 'url', regex: '^https://example\\.com/api/' }),
+        { type: 'url', regex: '^https://example\\.com/api/' },
       );
     },
   },
   {
-    name: 'all_of populates children from terms',
+    name: 'and populates children from matches',
     run: () => {
       const node = normalizeMatcher({
-        kind: 'all_of',
-        terms: [{ kind: 'geosite', tag: 'CN' }, { kind: 'geoip', tag: 'CN' }],
+        type: 'and',
+        matches: [{ type: 'geosite', tag: 'CN' }, { type: 'geoip', tag: 'CN' }],
       });
-      assert.equal(node.kind, 'all_of');
+      assert.equal(node.type, 'and');
       assert.equal(node.children.length, 2);
-      assert.equal(node.children[0].kind, 'geosite');
-      assert.equal(node.children[1].kind, 'geoip');
+      assert.equal(node.children[0].type, 'geosite');
+      assert.equal(node.children[1].type, 'geoip');
     },
   },
   {
-    name: 'not populates one child from term',
+    name: 'not populates one child from match',
     run: () => {
       const node = normalizeMatcher({
-        kind: 'not',
-        term: { kind: 'domain', regex: 'foo' },
+        type: 'not',
+        match: { type: 'domain', regex: 'foo' },
       });
-      assert.equal(node.kind, 'not');
+      assert.equal(node.type, 'not');
       assert.equal(node.children.length, 1);
-      assert.equal(node.children[0].kind, 'domain');
+      assert.equal(node.children[0].type, 'domain');
     },
   },
   {
-    name: 'convertKind leaf -> not wraps as child',
+    name: 'convertType leaf -> not wraps as child',
     run: () => {
-      const node = normalizeMatcher({ kind: 'geosite', tag: 'A' });
-      const next = convertKind(node, 'not');
-      assert.equal(next.kind, 'not');
+      const node = normalizeMatcher({ type: 'geosite', tag: 'A' });
+      const next = convertType(node, 'not');
+      assert.equal(next.type, 'not');
       assert.equal(next.children.length, 1);
-      assert.equal(next.children[0].kind, 'geosite');
+      assert.equal(next.children[0].type, 'geosite');
       assert.equal(next.children[0].tag, 'A');
     },
   },
   {
-    name: 'convertKind leaf -> all_of wraps as terms[0]',
+    name: 'convertType leaf -> and wraps as matches[0]',
     run: () => {
-      const node = normalizeMatcher({ kind: 'geoip', tag: 'CN' });
-      const next = convertKind(node, 'all_of');
-      assert.equal(next.kind, 'all_of');
+      const node = normalizeMatcher({ type: 'geoip', tag: 'CN' });
+      const next = convertType(node, 'and');
+      assert.equal(next.type, 'and');
       assert.equal(next.children.length, 1);
-      assert.equal(next.children[0].kind, 'geoip');
+      assert.equal(next.children[0].type, 'geoip');
     },
   },
   {
-    name: 'convertKind all_of -> any_of preserves children',
+    name: 'convertType and -> or preserves children',
     run: () => {
       const node = normalizeMatcher({
-        kind: 'all_of',
-        terms: [{ kind: 'geosite', tag: 'A' }, { kind: 'geoip', tag: 'B' }],
+        type: 'and',
+        matches: [{ type: 'geosite', tag: 'A' }, { type: 'geoip', tag: 'B' }],
       });
-      const next = convertKind(node, 'any_of');
-      assert.equal(next.kind, 'any_of');
+      const next = convertType(node, 'or');
+      assert.equal(next.type, 'or');
       assert.equal(next.children.length, 2);
-      assert.equal(next.children[0].kind, 'geosite');
+      assert.equal(next.children[0].type, 'geosite');
     },
   },
   {
-    name: 'convertKind composite -> leaf drops children silently',
+    name: 'convertType composite -> leaf drops children silently',
     run: () => {
       const node = normalizeMatcher({
-        kind: 'all_of',
-        terms: [{ kind: 'geosite', tag: 'A' }],
+        type: 'and',
+        matches: [{ type: 'geosite', tag: 'A' }],
       });
-      const next = convertKind(node, 'any');
-      assert.equal(next.kind, 'any');
+      const next = convertType(node, 'any');
+      assert.equal(next.type, 'any');
       assert.equal(next.children.length, 0);
     },
   },
   {
-    name: 'convertKind to advanced serializes',
+    name: 'convertType to advanced serializes',
     run: () => {
       const node = normalizeMatcher({
-        kind: 'all_of',
-        terms: [{ kind: 'geosite', tag: 'A' }],
+        type: 'and',
+        matches: [{ type: 'geosite', tag: 'A' }],
       });
-      const next = convertKind(node, '__advanced__');
-      assert.equal(next.kind, '__advanced__');
+      const next = convertType(node, '__advanced__');
+      assert.equal(next.type, '__advanced__');
       const parsed = JSON.parse(next.json);
-      assert.equal(parsed.kind, 'all_of');
-      assert.equal(parsed.terms[0].tag, 'A');
+      assert.equal(parsed.type, 'and');
+      assert.equal(parsed.matches[0].tag, 'A');
     },
   },
   {
-    name: 'convertKind from advanced with bad JSON falls back to leaf',
+    name: 'convertType from advanced with bad JSON falls back to leaf',
     run: () => {
-      const advanced = { kind: '__advanced__', json: 'not json', children: [] };
-      const next = convertKind(advanced, 'any');
-      assert.equal(next.kind, 'any');
+      const advanced = { type: '__advanced__', json: 'not json', children: [] };
+      const next = convertType(advanced, 'any');
+      assert.equal(next.type, 'any');
     },
   },
   {
-    name: 'convertKind from advanced with valid JSON normalizes',
+    name: 'convertType from advanced with valid JSON normalizes',
     run: () => {
       const advanced = {
-        kind: '__advanced__',
-        json: JSON.stringify({ kind: 'geosite', tag: 'X' }),
+        type: '__advanced__',
+        json: JSON.stringify({ type: 'geosite', tag: 'X' }),
         children: [],
       };
-      const next = convertKind(advanced, 'geosite');
-      assert.equal(next.kind, 'geosite');
+      const next = convertType(advanced, 'geosite');
+      assert.equal(next.type, 'geosite');
       assert.equal(next.tag, 'X');
     },
   },
   {
-    name: 'convertKind leaf -> all_of does not create circular reference',
+    name: 'convertType leaf -> and does not create circular reference',
     run: () => {
-      const node = normalizeMatcher({ kind: 'geosite', tag: 'A' });
-      const next = convertKind(node, 'all_of');
+      const node = normalizeMatcher({ type: 'geosite', tag: 'A' });
+      const next = convertType(node, 'and');
       assert.notEqual(next.children[0], node);
-      assert.equal(next.children[0].kind, 'geosite');
+      assert.equal(next.children[0].type, 'geosite');
       assert.equal(next.children[0].tag, 'A');
     },
   },
@@ -151,16 +151,16 @@ export const tests = [
     name: 'deep tree validates against config schema',
     run: () => {
       const tree = {
-        kind: 'all_of',
-        terms: [
+        type: 'and',
+        matches: [
           {
-            kind: 'any_of',
-            terms: [
-              { kind: 'geosite', tag: 'GOOGLE' },
-              { kind: 'geoip', tag: 'US' },
+            type: 'or',
+            matches: [
+              { type: 'geosite', tag: 'GOOGLE' },
+              { type: 'geoip', tag: 'US' },
             ],
           },
-          { kind: 'not', term: { kind: 'domain', regex: 'safe' } },
+          { type: 'not', match: { type: 'domain', regex: 'safe' } },
         ],
       };
       const node = normalizeMatcher(tree);
@@ -168,12 +168,13 @@ export const tests = [
 
       const config = defaultConfig();
       config.rules.push({
-        id: 'r1',
         name: 'deep',
         enabled: true,
         action: 'block',
-        website: { kind: 'any' },
-        resource: serialized,
+        strip_referrer: false,
+        bidirectional: false,
+        source: { type: 'any' },
+        destination: serialized,
       });
       const validation = validateConfig(config);
       assert.equal(validation.ok, true, JSON.stringify(validation.errors));

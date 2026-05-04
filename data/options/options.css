@@ -309,6 +309,9 @@ fieldset {
 
 fieldset legend { padding: 0 4px; font-weight: 600; }
 
+fieldset[hidden] { display: none; }
+label[hidden] { display: none; }
+
 .matcher-node {
   display: flex;
   flex-direction: column;

@@ -15,6 +15,33 @@ let activeConfig = null;
 let activeConfigHasStripRule = false;
 let listenersAttached = false;
 
+const verdictCache = new Map();
+const VERDICT_CACHE_MAX = 100;
+
+export function cachePutVerdict(requestId, result) {
+  if (requestId == null) return;
+  if (verdictCache.size >= VERDICT_CACHE_MAX) {
+    const oldest = verdictCache.keys().next().value;
+    if (oldest !== undefined) verdictCache.delete(oldest);
+  }
+  verdictCache.set(requestId, result);
+}
+
+export function cacheTakeVerdict(requestId) {
+  if (requestId == null) return undefined;
+  const cached = verdictCache.get(requestId);
+  if (cached !== undefined) verdictCache.delete(requestId);
+  return cached;
+}
+
+export function _verdictCacheSize() {
+  return verdictCache.size;
+}
+
+export function _hasStripRule() {
+  return activeConfigHasStripRule;
+}
+
 export function setConfig(config) {
   activeConfig = config;
   activeConfigHasStripRule = configHasStripRule(config);
@@ -22,7 +49,7 @@ export function setConfig(config) {
 
 function configHasStripRule(config) {
   const rules = Array.isArray(config?.rules) ? config.rules : [];
-  return rules.some(r => r?.enabled !== false && r?.action === 'block' && r?.strip_referrer_on_navigation === true);
+  return rules.some(r => r?.enabled !== false && r?.action === 'block' && r?.strip_referrer === true);
 }
 
 export function attach() {
@@ -68,7 +95,7 @@ function isDescendant(frames, frameId, ancestorId) {
   return false;
 }
 
-export function deriveWebsiteContext(details, frames = tabFrames) {
+export function deriveSourceContext(details, frames = tabFrames) {
   if (details.tabId >= 0) {
     const frame = frames.get(details.tabId)?.get(details.frameId)
       ?? frames.get(details.tabId)?.get(0);
@@ -91,17 +118,20 @@ async function handleBeforeRequest(details) {
     whenReady: () => geo.whenReady(),
     trace: true,
   });
+  if (details.type === 'main_frame' && activeConfigHasStripRule && result?.matchedRule) {
+    cachePutVerdict(details.requestId, result);
+  }
   if (result?.verdict !== 'block') return undefined;
   if (details.type === 'main_frame' && matchedRuleStrips(result.matchedRule)) return undefined;
 
   const tabId = details.tabId;
   const flush = blockLog.record(tabId, {
     ts: Date.now(),
-    resourceUrl: details.url,
-    resourceHost: extractHost(details.url),
-    resourceType: details.type,
-    websiteHost: result.contexts?.website?.host ?? '',
-    websiteUrl: result.contexts?.website?.url ?? '',
+    destinationUrl: details.url,
+    destinationHost: extractHost(details.url),
+    destinationType: details.type,
+    sourceHost: result.contexts?.source?.host ?? '',
+    sourceUrl: result.contexts?.source?.url ?? '',
     matchedRule: result.matchedRule,
     trace: result.trace,
     contexts: result.contexts,
@@ -116,7 +146,7 @@ async function handleBeforeRequest(details) {
 function matchedRuleStrips(matchedRule) {
   if (!matchedRule || !activeConfig) return false;
   const rule = activeConfig.rules?.[matchedRule.index];
-  return !!rule && rule.action === 'block' && rule.strip_referrer_on_navigation === true;
+  return !!rule && rule.action === 'block' && rule.strip_referrer === true;
 }
 
 async function handleBeforeSendHeaders(details) {
@@ -124,7 +154,8 @@ async function handleBeforeSendHeaders(details) {
   if (details.type !== 'main_frame') return undefined;
   const original = details.requestHeaders ?? [];
   if (!original.some(h => h.name.toLowerCase() === 'referer')) return undefined;
-  const result = await evaluateRequest(details, {
+  const cached = cacheTakeVerdict(details.requestId);
+  const result = cached ?? await evaluateRequest(details, {
     config: activeConfig,
     geo,
     dnsLookup: host => dnsCache.lookup(host),
@@ -138,11 +169,11 @@ async function handleBeforeSendHeaders(details) {
   const tabId = details.tabId;
   const flush = blockLog.record(tabId, {
     ts: Date.now(),
-    resourceUrl: details.url,
-    resourceHost: extractHost(details.url),
-    resourceType: details.type,
-    websiteHost: result.contexts?.website?.host ?? '',
-    websiteUrl: result.contexts?.website?.url ?? '',
+    destinationUrl: details.url,
+    destinationHost: extractHost(details.url),
+    destinationType: details.type,
+    sourceHost: result.contexts?.source?.host ?? '',
+    sourceUrl: result.contexts?.source?.url ?? '',
     matchedRule: result.matchedRule,
     trace: result.trace,
     contexts: result.contexts,
@@ -157,7 +188,7 @@ async function handleBeforeSendHeaders(details) {
 function notifyBlocksChanged(tabId) {
   try {
     browser.runtime.sendMessage({ kind: 'event:blocks.changed', tabId }).catch(() => {});
-  } catch { /* no listeners */ }
+  } catch { /* ... */ }
 }
 
 export async function evaluateRequest(details, { config, geo, dnsLookup, frames, selfOriginPrefix, whenReady, trace = false }) {
@@ -166,13 +197,13 @@ export async function evaluateRequest(details, { config, geo, dnsLookup, frames,
   if (details.type === 'main_frame' && !configHasStripRule(config)) return null;
   if (isSelfOriginated(details, selfOriginPrefix)) return null;
 
-  const resourceHost = extractHost(details.url);
-  if (!resourceHost) return null;
+  const destinationHost = extractHost(details.url);
+  if (!destinationHost) return null;
 
-  const website = deriveWebsiteContext(details, frames);
-  if (isSameSite(resourceHost, website.host)) return null;
-  const websiteContext = { host: website.host, url: website.url, ips: [] };
-  const resourceContext = { host: resourceHost, url: details.url, ips: [] };
+  const source = deriveSourceContext(details, frames);
+  if (isSameSite(destinationHost, source.host)) return null;
+  const sourceContext = { host: source.host, url: source.url, ips: [] };
+  const destinationContext = { host: destinationHost, url: details.url, ips: [] };
 
   if (whenReady) await whenReady();
 
@@ -183,8 +214,8 @@ export async function evaluateRequest(details, { config, geo, dnsLookup, frames,
   };
 
   try {
-    return await evaluate(config, { website: websiteContext, resource: resourceContext }, geo,
-      { resolveWebsite: resolve, resolveResource: resolve },
+    return await evaluate(config, { source: sourceContext, destination: destinationContext }, geo,
+      { resolveSource: resolve, resolveDestination: resolve },
       { trace });
   } catch (error) {
     console.error('GeoLock evaluate failed:', error);
@@ -230,12 +261,12 @@ async function resolveContextIps(ctx, dnsLookup) {
   } catch { ctx.ips = []; }
 }
 
-export async function probe({ websiteUrl, resourceUrl, resourceIp }) {
-  const websiteContext = { host: hostFromUserInput(websiteUrl), url: normalizeUserUrl(websiteUrl), ips: [] };
-  const resourceContext = { host: hostFromUserInput(resourceUrl), url: normalizeUserUrl(resourceUrl), ips: [] };
-  if (resourceIp) {
-    const parsed = parseIp(resourceIp);
-    if (parsed) resourceContext.ips = [parsed];
+export async function probe({ sourceUrl, destinationUrl, destinationIp }) {
+  const sourceContext = { host: hostFromUserInput(sourceUrl), url: normalizeUserUrl(sourceUrl), ips: [] };
+  const destinationContext = { host: hostFromUserInput(destinationUrl), url: normalizeUserUrl(destinationUrl), ips: [] };
+  if (destinationIp) {
+    const parsed = parseIp(destinationIp);
+    if (parsed) destinationContext.ips = [parsed];
   }
 
   const dnsLookup = host => dnsCache.lookup(host);
@@ -249,9 +280,9 @@ export async function probe({ websiteUrl, resourceUrl, resourceIp }) {
 
   return evaluate(
     activeConfig ?? { default_action: 'allow', rules: [] },
-    { website: websiteContext, resource: resourceContext },
+    { source: sourceContext, destination: destinationContext },
     geo,
-    { resolveWebsite: resolve, resolveResource: resolve },
+    { resolveSource: resolve, resolveDestination: resolve },
     { trace: true },
   );
 }

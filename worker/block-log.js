@@ -1,5 +1,20 @@
 const CAP = 100;
-const STORAGE_KEY = 'block_log_v1';
+const STORAGE_KEY = 'block_log_v2';
+
+const REQUIRED_ENTRY_FIELDS = [
+  'ts', 'destinationUrl', 'destinationHost', 'destinationType',
+  'sourceHost', 'sourceUrl', 'effect',
+];
+
+function validateEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    console.warn('block-log: entry must be an object', entry);
+    return;
+  }
+  for (const field of REQUIRED_ENTRY_FIELDS) {
+    if (!(field in entry)) console.warn(`block-log: entry missing field "${field}"`, entry);
+  }
+}
 
 const log = new Map();
 const lastUrl = new Map();
@@ -13,6 +28,7 @@ export const whenRestored = () => restorePromise;
 
 export function record(tabId, entry) {
   if (tabId < 0) return null;
+  validateEntry(entry);
   let entries = log.get(tabId);
   if (!entries) {
     entries = [];
@@ -40,6 +56,17 @@ export function clearTab(tabId) {
   return null;
 }
 
+export function dropMainFrameForUrl(tabId, url) {
+  if (tabId < 0) return null;
+  const entries = log.get(tabId);
+  if (!entries) return null;
+  const filtered = entries.filter(e => !(e.destinationType === 'main_frame' && e.destinationUrl === url));
+  if (filtered.length === entries.length) return null;
+  if (filtered.length === 0) log.delete(tabId);
+  else log.set(tabId, filtered);
+  return scheduleFlush();
+}
+
 export function count(tabId) {
   return log.get(tabId)?.length ?? 0;
 }
@@ -52,8 +79,8 @@ export function noteNavigation(tabId, url) {
     const committedHost = hostOf(url);
     const survivors = committedHost
       ? entries.filter(e => !e._consumed
-                         && e.resourceType === 'main_frame'
-                         && e.resourceHost === committedHost
+                         && e.destinationType === 'main_frame'
+                         && e.destinationHost === committedHost
                          && e.effect === 'referrer-stripped')
       : [];
     survivors.forEach(e => { e._consumed = true; });
