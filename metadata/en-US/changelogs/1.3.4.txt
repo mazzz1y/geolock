@@ -1,0 +1,2 @@
+- Always allow same-site sub-resources so a page cannot be blocked from loading its own assets
+- Persist popup blocked-request list across background restarts
