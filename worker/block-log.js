@@ -24,7 +24,13 @@ export function record(tabId, entry) {
 }
 
 export function getForTab(tabId) {
-  return log.get(tabId) ?? [];
+  const entries = log.get(tabId);
+  if (!entries) return [];
+  return entries.map(e => {
+    if (!('_consumed' in e)) return e;
+    const { _consumed, ...rest } = e;
+    return rest;
+  });
 }
 
 export function clearTab(tabId) {
@@ -40,14 +46,26 @@ export function count(tabId) {
 
 export function noteNavigation(tabId, url) {
   if (tabId < 0) return { cleared: false, flush: null };
-  const previous = lastUrl.get(tabId);
-  const same = previous && sameDocument(previous, url);
   lastUrl.set(tabId, url);
-  if (!same) {
-    log.delete(tabId);
-    return { cleared: true, flush: scheduleFlush() };
+  const entries = log.get(tabId);
+  if (entries) {
+    const committedHost = hostOf(url);
+    const survivors = committedHost
+      ? entries.filter(e => !e._consumed
+                         && e.resourceType === 'main_frame'
+                         && e.resourceHost === committedHost
+                         && e.effect === 'referrer-stripped')
+      : [];
+    survivors.forEach(e => { e._consumed = true; });
+    if (survivors.length) log.set(tabId, survivors);
+    else log.delete(tabId);
   }
-  return { cleared: false, flush: scheduleFlush() };
+  return { cleared: true, flush: scheduleFlush() };
+}
+
+function hostOf(url) {
+  try { return new URL(url).hostname.toLowerCase(); }
+  catch { return ''; }
 }
 
 export async function restore(activeTabIds) {
@@ -116,15 +134,4 @@ function scheduleFlush() {
 
 function sessionStorage() {
   return globalThis.browser?.storage?.session ?? null;
-}
-
-function sameDocument(a, b) {
-  if (a === b) return true;
-  try {
-    const ua = new URL(a);
-    const ub = new URL(b);
-    return ua.origin === ub.origin && ua.pathname === ub.pathname;
-  } catch {
-    return false;
-  }
 }

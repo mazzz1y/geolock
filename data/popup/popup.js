@@ -60,16 +60,20 @@ function saveTrace() {
 }
 
 function buildEntryNode(entry) {
+  const stripped = entry.effect === 'referrer-stripped';
   const details = elem('details', { class: 'block-entry' });
 
-  const resourceLine = entry.resourceUrl;
+  const summaryText = stripped
+    ? (entry.websiteUrl || entry.websiteHost || entry.resourceUrl)
+    : entry.resourceUrl;
   const ruleName = entry.matchedRule?.name
     || (entry.matchedRule ? `#${entry.matchedRule.index + 1}` : '');
 
-  const summary = elem('summary', { title: resourceLine },
+  const summary = elem('summary', { title: summaryText },
     elem('span', { class: 'caret' }),
     ruleName ? elem('span', { class: 'rule-tag' }, ruleName) : null,
-    elem('span', { class: 'entry-text' }, resourceLine),
+    stripped ? elem('span', { class: 'rule-tag ref-tag', title: 'Referrer header stripped' }, 'REF') : null,
+    elem('span', { class: 'entry-text' }, summaryText),
   );
   details.appendChild(summary);
 
@@ -79,7 +83,7 @@ function buildEntryNode(entry) {
     body.appendChild(buildTraceView({
       page: entry.websiteUrl || entry.websiteHost || '',
       resource: entry.resourceUrl,
-      verdict: 'block',
+      verdict: stripped ? 'referrer-stripped' : 'block',
       matchedRule: entry.matchedRule,
       trace: entry.trace,
       contexts: entry.contexts,

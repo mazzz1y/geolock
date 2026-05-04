@@ -12,10 +12,17 @@ const SELF_ORIGIN_PREFIX = (() => {
 })();
 
 let activeConfig = null;
+let activeConfigHasStripRule = false;
 let listenersAttached = false;
 
 export function setConfig(config) {
   activeConfig = config;
+  activeConfigHasStripRule = configHasStripRule(config);
+}
+
+function configHasStripRule(config) {
+  const rules = Array.isArray(config?.rules) ? config.rules : [];
+  return rules.some(r => r?.enabled !== false && r?.action === 'block' && r?.strip_referrer_on_navigation === true);
 }
 
 export function attach() {
@@ -26,6 +33,11 @@ export function attach() {
     handleBeforeRequest,
     { urls: ['<all_urls>'] },
     ['blocking'],
+  );
+  browser.webRequest.onBeforeSendHeaders.addListener(
+    handleBeforeSendHeaders,
+    { urls: ['<all_urls>'], types: ['main_frame'] },
+    ['blocking', 'requestHeaders'],
   );
   browser.tabs.onRemoved.addListener(tabId => tabFrames.delete(tabId));
 }
@@ -79,25 +91,67 @@ async function handleBeforeRequest(details) {
     whenReady: () => geo.whenReady(),
     trace: true,
   });
-  if (result?.verdict === 'block') {
-    const tabId = details.tabId;
-    const flush = blockLog.record(tabId, {
-      ts: Date.now(),
-      resourceUrl: details.url,
-      resourceHost: extractHost(details.url),
-      resourceType: details.type,
-      websiteHost: result.contexts?.website?.host ?? '',
-      websiteUrl: result.contexts?.website?.url ?? '',
-      matchedRule: result.matchedRule,
-      trace: result.trace,
-      contexts: result.contexts,
-    });
-    badge.updateBadge(tabId);
-    notifyBlocksChanged(tabId);
-    if (flush) await flush;
-    return { cancel: true };
-  }
-  return undefined;
+  if (result?.verdict !== 'block') return undefined;
+  if (details.type === 'main_frame' && matchedRuleStrips(result.matchedRule)) return undefined;
+
+  const tabId = details.tabId;
+  const flush = blockLog.record(tabId, {
+    ts: Date.now(),
+    resourceUrl: details.url,
+    resourceHost: extractHost(details.url),
+    resourceType: details.type,
+    websiteHost: result.contexts?.website?.host ?? '',
+    websiteUrl: result.contexts?.website?.url ?? '',
+    matchedRule: result.matchedRule,
+    trace: result.trace,
+    contexts: result.contexts,
+    effect: 'block',
+  });
+  badge.updateBadge(tabId);
+  notifyBlocksChanged(tabId);
+  if (flush) await flush;
+  return { cancel: true };
+}
+
+function matchedRuleStrips(matchedRule) {
+  if (!matchedRule || !activeConfig) return false;
+  const rule = activeConfig.rules?.[matchedRule.index];
+  return !!rule && rule.action === 'block' && rule.strip_referrer_on_navigation === true;
+}
+
+async function handleBeforeSendHeaders(details) {
+  if (!activeConfigHasStripRule) return undefined;
+  if (details.type !== 'main_frame') return undefined;
+  const original = details.requestHeaders ?? [];
+  if (!original.some(h => h.name.toLowerCase() === 'referer')) return undefined;
+  const result = await evaluateRequest(details, {
+    config: activeConfig,
+    geo,
+    dnsLookup: host => dnsCache.lookup(host),
+    frames: tabFrames,
+    selfOriginPrefix: SELF_ORIGIN_PREFIX,
+    whenReady: () => geo.whenReady(),
+    trace: true,
+  });
+  if (result?.verdict !== 'block') return undefined;
+  if (!matchedRuleStrips(result.matchedRule)) return undefined;
+  const tabId = details.tabId;
+  const flush = blockLog.record(tabId, {
+    ts: Date.now(),
+    resourceUrl: details.url,
+    resourceHost: extractHost(details.url),
+    resourceType: details.type,
+    websiteHost: result.contexts?.website?.host ?? '',
+    websiteUrl: result.contexts?.website?.url ?? '',
+    matchedRule: result.matchedRule,
+    trace: result.trace,
+    contexts: result.contexts,
+    effect: 'referrer-stripped',
+  });
+  badge.updateBadge(tabId);
+  notifyBlocksChanged(tabId);
+  if (flush) await flush;
+  return { requestHeaders: original.filter(h => h.name.toLowerCase() !== 'referer') };
 }
 
 function notifyBlocksChanged(tabId) {
@@ -108,7 +162,8 @@ function notifyBlocksChanged(tabId) {
 
 export async function evaluateRequest(details, { config, geo, dnsLookup, frames, selfOriginPrefix, whenReady, trace = false }) {
   if (!config) return null;
-  if (details.type === 'main_frame' || details.type === 'csp_report') return null;
+  if (details.type === 'csp_report') return null;
+  if (details.type === 'main_frame' && !configHasStripRule(config)) return null;
   if (isSelfOriginated(details, selfOriginPrefix)) return null;
 
   const resourceHost = extractHost(details.url);

@@ -167,6 +167,11 @@ details.block-entry[open] > summary .caret::before { transform: rotate(90deg); }
   white-space: nowrap;
 }
 
+.rule-tag.ref-tag {
+  background: color-mix(in srgb, #d97706 18%, Canvas 82%);
+  color: #b45309;
+}
+
 .entry-text {
   flex: 1 1 auto;
   min-width: 0;

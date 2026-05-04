@@ -128,7 +128,10 @@ function renderRule(rule, index) {
   enabledToggle.addEventListener('change', () => updateRule(index, { enabled: enabledToggle.checked }));
 
   const actionLabel = elem('span', { class: rule.action === 'block' ? 'action-block' : 'action-allow' }, rule.action.toUpperCase());
-  const biBadge = rule.bidirectional ? elem('span', { class: 'rule-badge', title: 'Fires in both directions' }, '↔ bidirectional') : null;
+  const biBadge = rule.bidirectional ? elem('span', { class: 'rule-badge', title: 'Fires in both directions' }, 'bidirectional') : null;
+  const stripBadge = rule.strip_referrer_on_navigation
+    ? elem('span', { class: 'rule-badge', title: 'Strip Referrer on top-level navigations that match this rule' }, 'strip-referrer')
+    : null;
 
   const actions = elem('div', { class: 'rule-actions' },
     button('Up', () => moveRule(index, -1), { disabled: index === 0 }),
@@ -144,6 +147,7 @@ function renderRule(rule, index) {
       elem('span', { class: 'rule-name' }, rule.name || `Rule ${index + 1}`),
       actionLabel,
       biBadge,
+      stripBadge,
       actions,
     ),
     elem('div', { class: 'rule-summary' },
@@ -220,7 +224,7 @@ async function persist(config) {
 function openRuleEditor(index) {
   const isNew = index === -1;
   const rule = isNew
-    ? { name: '', enabled: true, bidirectional: false, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }
+    ? { name: '', enabled: true, bidirectional: false, strip_referrer_on_navigation: false, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }
     : structuredClone(currentConfig.rules[index]);
 
   $('rule-dialog-title').textContent = isNew ? 'New rule' : 'Edit rule';
@@ -228,7 +232,16 @@ function openRuleEditor(index) {
   $('rule-enabled').checked = rule.enabled !== false;
   $('rule-bidirectional').checked = rule.bidirectional === true;
   $('rule-action').value = rule.action;
+  $('rule-strip-referrer').checked = rule.strip_referrer_on_navigation === true;
   $('rule-error').textContent = '';
+
+  const updateStripVisibility = () => {
+    const isBlock = $('rule-action').value === 'block';
+    $('rule-strip-referrer-row').hidden = !isBlock;
+    $('rule-strip-referrer-hint').hidden = !isBlock;
+  };
+  updateStripVisibility();
+  $('rule-action').onchange = updateStripVisibility;
 
   const websiteEditor = mountMatcherEditor($('rule-website'), rule.website);
   const resourceEditor = mountMatcherEditor($('rule-resource'), rule.resource);
@@ -239,6 +252,7 @@ function openRuleEditor(index) {
     rule.enabled = $('rule-enabled').checked;
     rule.bidirectional = $('rule-bidirectional').checked;
     rule.action = $('rule-action').value;
+    rule.strip_referrer_on_navigation = rule.action === 'block' && $('rule-strip-referrer').checked;
     rule.website = websiteEditor.read();
     rule.resource = resourceEditor.read();
 

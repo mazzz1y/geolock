@@ -153,4 +153,45 @@ export const tests = [
       assert.equal(validateConfig(config).ok, false);
     },
   },
+  {
+    name: 'accepts strip_referrer_on_navigation flag',
+    run: () => {
+      const config = defaultConfig();
+      config.rules.push({
+        enabled: true, action: 'block', strip_referrer_on_navigation: true,
+        website: { kind: 'any' },
+        resource: { kind: 'any' },
+      });
+      const result = validateConfig(config);
+      assert.equal(result.ok, true, JSON.stringify(result.errors));
+    },
+  },
+  {
+    name: 'rejects non-boolean strip_referrer_on_navigation',
+    run: () => {
+      const config = defaultConfig();
+      config.rules.push({
+        enabled: true, action: 'block', strip_referrer_on_navigation: 'yes',
+        website: { kind: 'any' },
+        resource: { kind: 'any' },
+      });
+      const result = validateConfig(config);
+      assert.equal(result.ok, false);
+      assert.ok(result.errors.find(e => e.path.endsWith('/strip_referrer_on_navigation')));
+    },
+  },
+  {
+    name: 'mergeWithDefaults defaults strip_referrer_on_navigation to false',
+    run: () => {
+      const merged = mergeWithDefaults({ rules: [{ action: 'block', website: { kind: 'any' }, resource: { kind: 'any' } }] });
+      assert.equal(merged.rules[0].strip_referrer_on_navigation, false);
+    },
+  },
+  {
+    name: 'mergeWithDefaults preserves strip_referrer_on_navigation true',
+    run: () => {
+      const merged = mergeWithDefaults({ rules: [{ action: 'block', strip_referrer_on_navigation: true, website: { kind: 'any' }, resource: { kind: 'any' } }] });
+      assert.equal(merged.rules[0].strip_referrer_on_navigation, true);
+    },
+  },
 ];

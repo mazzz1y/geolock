@@ -142,6 +142,10 @@
         <label class="inline"><input type="checkbox" id="rule-enabled" /> Enabled</label>
         <label class="inline"><input type="checkbox" id="rule-bidirectional" /> Bidirectional</label>
         <p class="muted small">Also fires when website and resource matchers are swapped</p>
+        <label class="inline" id="rule-strip-referrer-row" hidden>
+          <input type="checkbox" id="rule-strip-referrer" /> Strip Referrer
+        </label>
+        <p class="muted small" id="rule-strip-referrer-hint" hidden>Remove the Referrer header on top-level navigations that match this rule</p>
         <fieldset>
           <legend>Website matcher</legend>
           <div id="rule-website"></div>

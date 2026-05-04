@@ -130,27 +130,15 @@ export const tests = [
     },
   },
   {
-    name: 'noteNavigation: same path keeps log',
+    name: 'noteNavigation: reload of same URL clears sub-resource entries',
     run: () => {
       blockLog.clearTab(21);
       blockLog.noteNavigation(21, 'https://example.com/page');
       blockLog.record(21, makeEntry());
       const result = blockLog.noteNavigation(21, 'https://example.com/page');
-      assert.equal(result.cleared, false);
-      assert.equal(blockLog.count(21), 1);
+      assert.equal(result.cleared, true);
+      assert.equal(blockLog.count(21), 0);
       blockLog.clearTab(21);
-    },
-  },
-  {
-    name: 'noteNavigation: hash/query change keeps log',
-    run: () => {
-      blockLog.clearTab(22);
-      blockLog.noteNavigation(22, 'https://example.com/page');
-      blockLog.record(22, makeEntry());
-      assert.equal(blockLog.noteNavigation(22, 'https://example.com/page#section').cleared, false);
-      assert.equal(blockLog.noteNavigation(22, 'https://example.com/page?q=1').cleared, false);
-      assert.equal(blockLog.count(22), 1);
-      blockLog.clearTab(22);
     },
   },
   {
@@ -169,7 +157,7 @@ export const tests = [
       blockLog.clearTab(24);
       blockLog.noteNavigation(24, 'https://example.com/page');
       blockLog.record(24, makeEntry());
-      assert.equal(blockLog.noteNavigation(24, 'https://other.com/page').cleared, true);
+      assert.equal(blockLog.noteNavigation(24, 'https://other.example/page').cleared, true);
       assert.equal(blockLog.count(24), 0);
     },
   },
@@ -201,7 +189,6 @@ export const tests = [
       await blockLog.restore(new Set([30, 31]));
       assert.equal(blockLog.count(30), 2);
       assert.equal(blockLog.count(31), 1);
-      assert.equal(blockLog.noteNavigation(30, 'https://example.com/a').cleared, false);
       await blockLog.clearTab(30);
       await blockLog.clearTab(31);
     },
@@ -302,6 +289,84 @@ export const tests = [
       const promise = blockLog.whenRestored();
       assert.ok(promise && typeof promise.then === 'function');
       await promise;
+    },
+  },
+  {
+    name: 'noteNavigation: stripped main_frame entry survives commit to same host',
+    run: () => {
+      blockLog.clearTab(90);
+      blockLog.noteNavigation(90, 'https://source.example/page');
+      blockLog.record(90, {
+        ts: Date.now(),
+        resourceUrl: 'https://dest.example/landing',
+        resourceHost: 'dest.example',
+        resourceType: 'main_frame',
+        effect: 'referrer-stripped',
+      });
+      const result = blockLog.noteNavigation(90, 'https://dest.example/landing');
+      assert.equal(result.cleared, true);
+      assert.equal(blockLog.count(90), 1);
+      assert.equal(blockLog.getForTab(90)[0].resourceHost, 'dest.example');
+      blockLog.clearTab(90);
+    },
+  },
+  {
+    name: 'noteNavigation: sub-resource entries cleared, stripped main_frame survives',
+    run: () => {
+      blockLog.clearTab(91);
+      blockLog.noteNavigation(91, 'https://source.example/page');
+      blockLog.record(91, { ts: 1, resourceUrl: 'https://ads.example/img.png', resourceHost: 'ads.example', resourceType: 'image', effect: 'block' });
+      blockLog.record(91, { ts: 2, resourceUrl: 'https://tracker.example/p', resourceHost: 'tracker.example', resourceType: 'xmlhttprequest', effect: 'block' });
+      blockLog.record(91, { ts: 3, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.noteNavigation(91, 'https://dest.example/landing');
+      assert.equal(blockLog.count(91), 1);
+      assert.equal(blockLog.getForTab(91)[0].resourceType, 'main_frame');
+      assert.equal(blockLog.getForTab(91)[0].resourceHost, 'dest.example');
+      blockLog.clearTab(91);
+    },
+  },
+  {
+    name: 'noteNavigation: main_frame entry to different host dropped on commit',
+    run: () => {
+      blockLog.clearTab(92);
+      blockLog.noteNavigation(92, 'https://source.example/page1');
+      blockLog.record(92, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.noteNavigation(92, 'https://other.example/page');
+      assert.equal(blockLog.count(92), 0);
+      blockLog.clearTab(92);
+    },
+  },
+  {
+    name: 'noteNavigation: stripped entry consumed after first commit, dropped on second',
+    run: () => {
+      blockLog.clearTab(93);
+      blockLog.record(93, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.noteNavigation(93, 'https://dest.example/landing');
+      assert.equal(blockLog.count(93), 1);
+      blockLog.noteNavigation(93, 'https://dest.example/other');
+      assert.equal(blockLog.count(93), 0);
+    },
+  },
+  {
+    name: 'noteNavigation: reload of stripped destination drops the entry',
+    run: () => {
+      blockLog.clearTab(94);
+      blockLog.record(94, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.noteNavigation(94, 'https://dest.example/landing');
+      blockLog.noteNavigation(94, 'https://dest.example/landing');
+      assert.equal(blockLog.count(94), 0);
+    },
+  },
+  {
+    name: 'getForTab strips _consumed flag from output',
+    run: () => {
+      blockLog.clearTab(95);
+      blockLog.record(95, { ts: 1, resourceUrl: 'https://dest.example/landing', resourceHost: 'dest.example', resourceType: 'main_frame', effect: 'referrer-stripped' });
+      blockLog.noteNavigation(95, 'https://dest.example/landing');
+      const entries = blockLog.getForTab(95);
+      assert.equal(entries.length, 1);
+      assert.equal('_consumed' in entries[0], false);
+      blockLog.clearTab(95);
     },
   },
   {

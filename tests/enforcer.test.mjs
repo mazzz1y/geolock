@@ -117,9 +117,74 @@ export const tests = [
     },
   },
   {
-    name: 'evaluateRequest: main_frame returns null',
+    name: 'evaluateRequest: main_frame returns null when no strip rule configured',
     run: async () => {
       const result = await evaluateRequest({ type: 'main_frame', url: 'https://x/', tabId: -1, frameId: -1 }, baseDeps());
+      assert.equal(result, null);
+    },
+  },
+  {
+    name: 'evaluateRequest: main_frame evaluates when strip rule present',
+    run: async () => {
+      const stripConfig = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{
+          enabled: true,
+          action: 'block',
+          strip_referrer_on_navigation: true,
+          website: { kind: 'domain', regex: '(^|\\.)mybank\\.com$' },
+          resource: { kind: 'any' },
+        }],
+      };
+      const result = await evaluateRequest({
+        type: 'main_frame',
+        url: 'https://evil.example/landing',
+        tabId: -1, frameId: -1,
+        documentUrl: 'https://mybank.com/account',
+      }, baseDeps({ config: stripConfig }));
+      assert.equal(result.verdict, 'block');
+      assert.equal(result.matchedRule.index, 0);
+    },
+  },
+  {
+    name: 'evaluateRequest: main_frame stays exempt when no rule has strip flag',
+    run: async () => {
+      const blockConfig = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{
+          enabled: true,
+          action: 'block',
+          strip_referrer_on_navigation: false,
+          website: { kind: 'domain', regex: '(^|\\.)mybank\\.com$' },
+          resource: { kind: 'any' },
+        }],
+      };
+      const result = await evaluateRequest({
+        type: 'main_frame',
+        url: 'https://evil.example/landing',
+        tabId: -1, frameId: -1,
+        documentUrl: 'https://mybank.com/account',
+      }, baseDeps({ config: blockConfig }));
+      assert.equal(result, null);
+    },
+  },
+  {
+    name: 'evaluateRequest: csp_report stays exempt even with strip rule',
+    run: async () => {
+      const stripConfig = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{
+          enabled: true,
+          action: 'block',
+          strip_referrer_on_navigation: true,
+          website: { kind: 'any' },
+          resource: { kind: 'any' },
+        }],
+      };
+      const result = await evaluateRequest({ type: 'csp_report', url: 'https://x/', tabId: -1, frameId: -1 }, baseDeps({ config: stripConfig }));
       assert.equal(result, null);
     },
   },

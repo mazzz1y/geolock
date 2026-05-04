@@ -114,6 +114,9 @@ function validateRule(rule, path, errors) {
   if (rule.bidirectional !== undefined && typeof rule.bidirectional !== 'boolean') {
     errors.push({ path: `${path}/bidirectional`, message: 'must be boolean' });
   }
+  if (rule.strip_referrer_on_navigation !== undefined && typeof rule.strip_referrer_on_navigation !== 'boolean') {
+    errors.push({ path: `${path}/strip_referrer_on_navigation`, message: 'must be boolean' });
+  }
   validateMatcher(rule.website, `${path}/website`, errors);
   validateMatcher(rule.resource, `${path}/resource`, errors);
 }
@@ -244,6 +247,7 @@ function normalizeRule(rule) {
     name: typeof rule?.name === 'string' ? rule.name : '',
     enabled: rule?.enabled !== false,
     bidirectional: rule?.bidirectional === true,
+    strip_referrer_on_navigation: rule?.strip_referrer_on_navigation === true,
     website: rule?.website ? structuredClone(rule.website) : { kind: 'any' },
     resource: rule?.resource ? structuredClone(rule.resource) : { kind: 'any' },
     action: ACTIONS.has(rule?.action) ? rule.action : 'block',
