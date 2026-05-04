@@ -220,4 +220,93 @@ export const tests = [
       assert.ok(events.indexOf('whenReady-resolved') < events.indexOf('inGeoipTag'));
     },
   },
+  {
+    name: 'evaluateRequest: same-host resource skips rule evaluation',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+      };
+      const frames = framesWith(7, 0, { host: 'ifconfig.co', url: 'https://ifconfig.co/', parentFrameId: -1 });
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://ifconfig.co/favicon.ico', tabId: 7, frameId: 0,
+      }, baseDeps({ config, frames }));
+      assert.equal(result, null);
+    },
+  },
+  {
+    name: 'evaluateRequest: subdomain of website is treated as same-site',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+      };
+      const frames = framesWith(7, 0, { host: 'example.com', url: 'https://example.com/', parentFrameId: -1 });
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://cdn.example.com/img.png', tabId: 7, frameId: 0,
+      }, baseDeps({ config, frames }));
+      assert.equal(result, null);
+    },
+  },
+  {
+    name: 'evaluateRequest: website subdomain of resource is same-site',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+      };
+      const frames = framesWith(7, 0, { host: 'app.example.com', url: 'https://app.example.com/', parentFrameId: -1 });
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://example.com/img.png', tabId: 7, frameId: 0,
+      }, baseDeps({ config, frames }));
+      assert.equal(result, null);
+    },
+  },
+  {
+    name: 'evaluateRequest: cross-site request still evaluated',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+      };
+      const frames = framesWith(7, 0, { host: 'example.com', url: 'https://example.com/', parentFrameId: -1 });
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://tracker.com/pixel.gif', tabId: 7, frameId: 0,
+      }, baseDeps({ config, frames }));
+      assert.equal(result.verdict, 'block');
+    },
+  },
+  {
+    name: 'evaluateRequest: empty website host falls through to evaluation',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+      };
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://example.com/img.png', tabId: -1, frameId: -1,
+      }, baseDeps({ config }));
+      assert.equal(result.verdict, 'block');
+    },
+  },
+  {
+    name: 'evaluateRequest: partial-suffix host is not same-site',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, website: { kind: 'any' }, resource: { kind: 'any' }, action: 'block' }],
+      };
+      const frames = framesWith(7, 0, { host: 'example.com', url: 'https://example.com/', parentFrameId: -1 });
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://otherexample.com/img.png', tabId: 7, frameId: 0,
+      }, baseDeps({ config, frames }));
+      assert.equal(result.verdict, 'block');
+    },
+  },
 ];

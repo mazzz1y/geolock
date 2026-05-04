@@ -114,6 +114,7 @@ export async function evaluateRequest(details, { config, geo, dnsLookup, frames,
   if (!resourceHost) return null;
 
   const website = deriveWebsiteContext(details, frames);
+  if (isSameSite(resourceHost, website.host)) return null;
   const websiteContext = { host: website.host, url: website.url, ips: [] };
   const resourceContext = { host: resourceHost, url: details.url, ips: [] };
 
@@ -155,6 +156,12 @@ function isSelfOriginated(details, selfOriginPrefix) {
     .some(candidate => typeof candidate === 'string' && candidate.startsWith(selfOriginPrefix));
 }
 
+function isSameSite(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.endsWith('.' + b) || b.endsWith('.' + a);
+}
+
 async function resolveContextIps(ctx, dnsLookup) {
   if (ctx.ips.length || !ctx.host) return;
   const literal = parseIp(ctx.host);
@@ -168,8 +175,8 @@ async function resolveContextIps(ctx, dnsLookup) {
 }
 
 export async function probe({ websiteUrl, resourceUrl, resourceIp }) {
-  const websiteContext = { host: hostFromUserInput(websiteUrl), url: websiteUrl, ips: [] };
-  const resourceContext = { host: hostFromUserInput(resourceUrl), url: resourceUrl, ips: [] };
+  const websiteContext = { host: hostFromUserInput(websiteUrl), url: normalizeUserUrl(websiteUrl), ips: [] };
+  const resourceContext = { host: hostFromUserInput(resourceUrl), url: normalizeUserUrl(resourceUrl), ips: [] };
   if (resourceIp) {
     const parsed = parseIp(resourceIp);
     if (parsed) resourceContext.ips = [parsed];
@@ -194,7 +201,12 @@ export async function probe({ websiteUrl, resourceUrl, resourceIp }) {
 }
 
 function hostFromUserInput(text) {
+  const normalized = normalizeUserUrl(text);
+  return normalized ? extractHost(normalized) : '';
+}
+
+function normalizeUserUrl(text) {
   if (typeof text !== 'string' || !text.trim()) return '';
   const trimmed = text.trim();
-  return extractHost(trimmed.includes('://') ? trimmed : `http://${trimmed}`);
+  return trimmed.includes('://') ? trimmed : `http://${trimmed}`;
 }
