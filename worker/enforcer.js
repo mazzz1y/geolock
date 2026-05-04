@@ -81,7 +81,7 @@ async function handleBeforeRequest(details) {
   });
   if (result?.verdict === 'block') {
     const tabId = details.tabId;
-    blockLog.record(tabId, {
+    const flush = blockLog.record(tabId, {
       ts: Date.now(),
       resourceUrl: details.url,
       resourceHost: extractHost(details.url),
@@ -94,6 +94,7 @@ async function handleBeforeRequest(details) {
     });
     badge.updateBadge(tabId);
     notifyBlocksChanged(tabId);
+    if (flush) await flush;
     return { cancel: true };
   }
   return undefined;

@@ -20,7 +20,15 @@ async function bootstrap() {
   enforcer.setConfig(config);
   applyDnsConfig(config.dns);
   badge.init();
-  badge.resetAllTabs().catch(() => {});
+  try {
+    const tabs = await browser.tabs.query({});
+    const activeIds = new Set(tabs.map(t => t?.id).filter(id => Number.isInteger(id) && id >= 0));
+    await blockLog.restore(activeIds);
+    for (const id of activeIds) badge.updateBadge(id);
+  } catch (error) {
+    console.error('GeoLock block-log restore failed:', error);
+    badge.resetAllTabs().catch(() => {});
+  }
   try { await geo.reloadAll(); }
   catch (error) { console.error('GeoLock geo reload failed:', error); }
   try { await updater.ensureHeartbeatAlarm(); }
@@ -52,15 +60,16 @@ browser.alarms.onAlarm.addListener(alarm => {
   updater.handleAlarm(alarm);
 });
 
-browser.webNavigation.onCommitted.addListener(({ tabId, frameId, url }) => {
+browser.webNavigation.onCommitted.addListener(async ({ tabId, frameId, url }) => {
   if (frameId !== 0) return;
-  if (blockLog.noteNavigation(tabId, url)) {
-    badge.updateBadge(tabId);
-  }
+  const { cleared, flush } = blockLog.noteNavigation(tabId, url);
+  if (cleared) badge.updateBadge(tabId);
+  if (flush) await flush;
 });
 
-browser.tabs.onRemoved.addListener(tabId => {
-  blockLog.clearTab(tabId);
+browser.tabs.onRemoved.addListener(async tabId => {
+  const flush = blockLog.clearTab(tabId);
+  if (flush) await flush;
 });
 
 const handlers = {
@@ -144,7 +153,10 @@ const handlers = {
     return { ok: true };
   },
 
-  'blocks.get': ({ tabId }) => ({ ok: true, entries: blockLog.getForTab(tabId) }),
+  'blocks.get': async ({ tabId }) => {
+    await blockLog.whenRestored();
+    return { ok: true, entries: blockLog.getForTab(tabId) };
+  },
 
   'tester.evaluate': async ({ websiteUrl, resourceUrl, resourceIp }) => {
     try {
