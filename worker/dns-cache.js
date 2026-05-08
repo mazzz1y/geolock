@@ -3,7 +3,7 @@ import { parseIp } from '../lib/ip.js';
 const DEFAULTS = {
   ttlMs: 300_000,
   negativeTtlMs: 30_000,
-  timeoutMs: 1500,
+  timeoutMs: 5000,
   maxEntries: 512,
 };
 

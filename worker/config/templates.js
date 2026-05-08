@@ -37,6 +37,6 @@ export const CONFIG_TEMPLATE = {
     geoip:   { url: '', auto_update: true, interval_hours: 24, sha256_url: '' },
     geosite: { url: '', auto_update: true, interval_hours: 24, sha256_url: '' },
   },
-  dns: { cache_ttl_seconds: 300, negative_cache_ttl_seconds: 30, timeout_ms: 1500, match_strategy: 'first' },
+  dns: { cache_ttl_seconds: 300, negative_cache_ttl_seconds: 30, timeout_ms: 5000, match_strategy: 'first' },
   rules: [],
 };

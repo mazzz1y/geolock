@@ -86,7 +86,7 @@ function renderDnsCard() {
   const dns = currentConfig.dns ?? {};
   $('dns-ttl').value = String(dns.cache_ttl_seconds ?? 300);
   $('dns-neg-ttl').value = String(dns.negative_cache_ttl_seconds ?? 30);
-  $('dns-timeout').value = String(dns.timeout_ms ?? 1500);
+  $('dns-timeout').value = String(dns.timeout_ms ?? 5000);
   $('dns-match-strategy').value = dns.match_strategy === 'all' ? 'all' : 'first';
 }
 
