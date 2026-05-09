@@ -1,0 +1,1 @@
+- DNS lookup timeout default raised from 1.5s to 5s
