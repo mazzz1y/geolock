@@ -1,0 +1,4 @@
+- Close cold-start gap: hold network requests on the blocking webRequest listener until config and block log finish loading, so the firewall cannot fail open while the background worker is initializing
+- Drop stale per-request verdict cache entries when the config changes, so old rules can no longer affect new evaluations
+- Reset stored configuration to defaults when validation fails on load instead of continuing with broken data
+- Guarantee the geo-data ready signal always resolves, even if loading fails, so handlers awaiting it never hang
