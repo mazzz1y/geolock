@@ -464,4 +464,35 @@ export const tests = [
       assert.equal(localSetCalls, 0, 'matching version must not trigger a write');
     },
   },
+  {
+    name: 'loadConfig: corrupt stored config is replaced with defaults',
+    run: async () => {
+      localStore.clear();
+      localStore.set('config', {
+        version: 2,
+        default_action: 'allow',
+        data_sources: {
+          geoip:   { url: '', auto_update: true, interval_hours: 24, sha256_url: '' },
+          geosite: { url: '', auto_update: true, interval_hours: 24, sha256_url: '' },
+        },
+        dns: { cache_ttl_seconds: 300, negative_cache_ttl_seconds: 30, timeout_ms: 5000, match_strategy: 'first' },
+        rules: [{ enabled: true, action: 'block',
+          source: { type: 'any' },
+          destination: { type: 'ip', cidr: 'totally-bogus' } }],
+      });
+      const originalError = console.error;
+      console.error = () => {};
+      localSetCalls = 0;
+      let returned;
+      try {
+        returned = await loadConfig();
+      } finally {
+        console.error = originalError;
+      }
+      assert.equal(returned.rules.length, 0, 'corrupt rules dropped');
+      assert.equal(returned.default_action, 'allow');
+      assert.equal(localSetCalls, 1, 'defaults must be persisted');
+      assert.equal(localStore.get('config').rules.length, 0);
+    },
+  },
 ];

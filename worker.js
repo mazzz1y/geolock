@@ -17,10 +17,18 @@ function applyDnsConfig(dns) {
 }
 
 async function bootstrap() {
-  const config = await loadConfig();
+  let config;
+  try {
+    config = await loadConfig();
+  } catch (error) {
+    console.error('GeoLock: loadConfig failed, falling back to defaults:', error);
+    config = defaultConfig();
+  }
+
   enforcer.setConfig(config);
   applyDnsConfig(config.dns);
   badge.init();
+
   try {
     const tabs = await browser.tabs.query({});
     const activeIds = new Set(tabs.map(t => t?.id).filter(id => Number.isInteger(id) && id >= 0));
@@ -30,10 +38,18 @@ async function bootstrap() {
     console.error('GeoLock block-log restore failed:', error);
     badge.resetAllTabs().catch(() => {});
   }
+
+  enforcer.markReady();
+
   try { await geo.reloadAll(); }
-  catch (error) { console.error('GeoLock geo reload failed:', error); }
+  catch (error) {
+    console.error('GeoLock geo reload failed:', error);
+    geo.forceReady();
+  }
+
   try { await updater.ensureHeartbeatAlarm(); }
   catch (error) { console.error('GeoLock alarm scheduling failed:', error); }
+
   updater.updateIfStale('geoip').catch(() => {});
   updater.updateIfStale('geosite').catch(() => {});
   updater.updateIfStale('remote').catch(() => {});

@@ -15,6 +15,20 @@ let activeConfig = null;
 let activeConfigHasStripRule = false;
 let listenersAttached = false;
 
+let ready = false;
+let readyResolve;
+const readyPromise = new Promise(resolve => { readyResolve = resolve; });
+
+export function markReady() {
+  if (ready) return;
+  ready = true;
+  readyResolve();
+}
+
+export function _isReady() {
+  return ready;
+}
+
 const verdictCache = new Map();
 const VERDICT_CACHE_MAX = 100;
 
@@ -45,6 +59,7 @@ export function _hasStripRule() {
 export function setConfig(config) {
   activeConfig = config;
   activeConfigHasStripRule = configHasStripRule(config);
+  verdictCache.clear();
 }
 
 function configHasStripRule(config) {
@@ -109,6 +124,7 @@ export function deriveSourceContext(details, frames = tabFrames) {
 }
 
 async function handleBeforeRequest(details) {
+  if (!ready) await readyPromise;
   const result = await evaluateRequest(details, {
     config: activeConfig,
     geo,
@@ -150,6 +166,7 @@ function matchedRuleStrips(matchedRule) {
 }
 
 async function handleBeforeSendHeaders(details) {
+  if (!ready) await readyPromise;
   if (!activeConfigHasStripRule) return undefined;
   if (details.type !== 'main_frame') return undefined;
   const original = details.requestHeaders ?? [];

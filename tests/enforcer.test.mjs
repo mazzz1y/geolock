@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { deriveSourceContext, evaluateRequest, cachePutVerdict, cacheTakeVerdict, _verdictCacheSize, _hasStripRule, setConfig, probe } from '../worker/enforcer.js';
+import { deriveSourceContext, evaluateRequest, cachePutVerdict, cacheTakeVerdict, _verdictCacheSize, _hasStripRule, _isReady, markReady, setConfig, probe } from '../worker/enforcer.js';
 import * as geo from '../worker/geo/index.js';
 import { parseIp } from '../lib/ip.js';
 
@@ -420,6 +420,27 @@ export const tests = [
     name: 'verdict cache: take returns undefined for ids that were never cached',
     run: () => {
       assert.equal(cacheTakeVerdict('phantom-id'), undefined);
+    },
+  },
+  {
+    name: 'ready gate: starts unready and becomes ready exactly once on markReady',
+    run: () => {
+      assert.equal(_isReady(), false, 'enforcer must start in unready state');
+      markReady();
+      assert.equal(_isReady(), true);
+      markReady();
+      assert.equal(_isReady(), true);
+    },
+  },
+  {
+    name: 'setConfig: clears verdict cache so stale entries from prior rules cannot leak',
+    run: () => {
+      cachePutVerdict('stale-1', { verdict: 'block' });
+      cachePutVerdict('stale-2', { verdict: 'block' });
+      assert.ok(_verdictCacheSize() >= 2);
+      setConfig({ default_action: 'allow', rules: [] });
+      assert.equal(_verdictCacheSize(), 0);
+      assert.equal(cacheTakeVerdict('stale-1'), undefined);
     },
   },
   {

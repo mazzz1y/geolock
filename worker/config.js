@@ -230,7 +230,10 @@ export async function loadConfig() {
   const merged = mergeWithDefaults(candidate);
   const validation = validateConfig(merged);
   if (!validation.ok) {
-    console.warn('GeoLock: stored config failed validation', validation.errors);
+    console.error('GeoLock: stored config failed validation, resetting to defaults', validation.errors);
+    const fresh = defaultConfig();
+    await browser.storage.local.set({ [CONFIG_KEY]: fresh });
+    return fresh;
   }
   if (candidate.version !== STORAGE_VERSION) {
     await browser.storage.local.set({ [CONFIG_KEY]: merged });

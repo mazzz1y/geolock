@@ -9,8 +9,16 @@ const geosite = createStore({ name: 'geosite', buildTagTrie: buildGeositeTagTrie
 
 let readyResolve;
 let readyPromise = new Promise(resolve => { readyResolve = resolve; });
+let readyResolved = false;
+
+function markReady() {
+  if (readyResolved) return;
+  readyResolved = true;
+  readyResolve();
+}
 
 export const whenReady = () => readyPromise;
+export const forceReady = () => markReady();
 
 function createStore({ name, buildTagTrie }) {
   const state = {
@@ -96,13 +104,14 @@ export async function reload(kind) {
   const store = kind === 'geoip' ? geoip : kind === 'geosite' ? geosite : null;
   if (!store) return null;
   await store.init();
+  markReady();
   flushWebRequestCache();
   return store.status();
 }
 
 export async function reloadAll() {
   await Promise.allSettled([geoip.init(), geosite.init()]);
-  readyResolve();
+  markReady();
   flushWebRequestCache();
 }
 
