@@ -18,6 +18,8 @@ async function init() {
     window.close();
   });
   document.getElementById('save-trace').addEventListener('click', saveTrace);
+  document.getElementById('fetch-remote').addEventListener('click', fetchRemoteConfig);
+  await updateFetchRemoteVisibility();
 
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   activeTabId = tab?.id ?? null;
@@ -36,6 +38,42 @@ async function render() {
     return;
   }
   list.replaceChildren(...[...currentEntries].reverse().map(buildEntryNode));
+}
+
+async function updateFetchRemoteVisibility() {
+  const button = document.getElementById('fetch-remote');
+  try {
+    const reply = await send({ kind: 'remote.get' });
+    const hasUrl = !!reply?.settings?.url;
+    button.hidden = !hasUrl;
+  } catch {
+    button.hidden = true;
+  }
+}
+
+async function fetchRemoteConfig() {
+  const button = document.getElementById('fetch-remote');
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Fetching…';
+  try {
+    const reply = await send({ kind: 'config.fetchRemote' });
+    if (!reply?.ok) {
+      button.textContent = 'Failed';
+      button.title = reply?.error ?? 'unknown error';
+    } else {
+      button.textContent = 'Applied';
+      button.title = '';
+    }
+  } catch (error) {
+    button.textContent = 'Failed';
+    button.title = String(error?.message ?? error);
+  } finally {
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.disabled = false;
+    }, 1500);
+  }
 }
 
 function saveTrace() {
