@@ -1,0 +1,1 @@
+- Add a "Fetch config" button to the toolbar popup that downloads and applies the remote configuration
