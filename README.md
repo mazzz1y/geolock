@@ -27,7 +27,7 @@ A rule pairs a **source** (the page making the request) with a **destination** (
 
 - **geoip** — country of the resolved IP (v2fly geoip.dat)
 - **geosite** — domain category like `google`, `category-ads-all` (v2fly geosite.dat)
-- **ruleset** — sing-box rule-set, binary `.srs` or JSON source format
+- **rule-set** — sing-box rule-set, binary `.srs` or JSON source format
 - **domain** — regex against the hostname
 - **url** — regex against the full URL
 - **ip** — CIDR range, IPv4 or IPv6

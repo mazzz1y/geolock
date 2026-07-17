@@ -5,7 +5,7 @@ export const MATCHER_TEMPLATES = {
   domain:  { type: 'domain', regex: '' },
   url:     { type: 'url', regex: '' },
   ip:      { type: 'ip', cidr: '' },
-  ruleset: { type: 'ruleset', tag: '' },
+  'rule-set': { type: 'rule-set', tag: '' },
   and:     { type: 'and', matches: [] },
   or:      { type: 'or', matches: [] },
   not:     { type: 'not', match: { type: 'any' } },
@@ -37,7 +37,7 @@ export const CONFIG_TEMPLATE = {
   data_sources: {
     geoip:   { url: '', auto_update: true, interval_hours: 24, sha256_url: '' },
     geosite: { url: '', auto_update: true, interval_hours: 24, sha256_url: '' },
-    rulesets: {},
+    rule_sets: {},
   },
   dns: { cache_ttl_seconds: 300, negative_cache_ttl_seconds: 30, timeout_ms: 5000, match_strategy: 'first' },
   rules: [],

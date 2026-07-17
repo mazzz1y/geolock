@@ -6,7 +6,7 @@ const LEAF_FIELDS = {
     return node;
   },
   geoip: input => ({ tag: typeof input.tag === 'string' ? input.tag : '' }),
-  ruleset: input => ({ tag: typeof input.tag === 'string' ? input.tag : '' }),
+  'rule-set': input => ({ tag: typeof input.tag === 'string' ? input.tag : '' }),
   domain: input => ({ regex: typeof input.regex === 'string' ? input.regex : '' }),
   url: input => ({ regex: typeof input.regex === 'string' ? input.regex : '' }),
   ip: input => ({ cidr: typeof input.cidr === 'string' ? input.cidr : '' }),
@@ -16,7 +16,7 @@ export const TYPE_LABELS = {
   any: 'any',
   geosite: 'geosite',
   geoip: 'geoip',
-  ruleset: 'ruleset',
+  'rule-set': 'rule-set',
   domain: 'domain',
   url: 'url',
   ip: 'ip',
@@ -59,8 +59,8 @@ export function serializeMatcher(node) {
     }
     case 'geoip':
       return { type: 'geoip', tag: String(node.tag ?? '') };
-    case 'ruleset':
-      return { type: 'ruleset', tag: String(node.tag ?? '') };
+    case 'rule-set':
+      return { type: 'rule-set', tag: String(node.tag ?? '') };
     case 'domain':
       return { type: 'domain', regex: String(node.regex ?? '') };
     case 'url':

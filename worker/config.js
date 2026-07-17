@@ -48,7 +48,7 @@ function walkAgainstTemplate(input, template, path, errors) {
   }
   for (const key of Object.keys(template)) {
     if (MATCHER_KEYS.has(key)) continue;
-    if (key === 'rulesets' && path === '/data_sources') continue;
+    if (key === 'rule_sets' && path === '/data_sources') continue;
     const childTemplate = template[key];
     const childPath = `${path}/${key}`;
     const childInput = input[key];
@@ -130,7 +130,7 @@ function semanticChecks(input, errors) {
         semanticStream(stream, `/data_sources/${k}`, errors);
       }
     }
-    semanticRulesets(input.data_sources.rulesets, errors);
+    semanticRulesets(input.data_sources.rule_sets, errors);
   }
   if (Array.isArray(input.rules)) {
     input.rules.forEach((rule, i) => semanticRule(rule, `/rules/${i}`, errors));
@@ -144,18 +144,18 @@ const RULESET_STREAM_KEYS = new Set(['url', 'sha256_url', 'auto_update', 'interv
 function semanticRulesets(rulesets, errors) {
   if (rulesets === undefined) return;
   if (!rulesets || typeof rulesets !== 'object' || Array.isArray(rulesets)) {
-    errors.push({ path: '/data_sources/rulesets', message: 'must be an object' });
+    errors.push({ path: '/data_sources/rule_sets', message: 'must be an object' });
     return;
   }
   const names = Object.keys(rulesets);
   if (names.length > RULESET_MAX_COUNT) {
-    errors.push({ path: '/data_sources/rulesets', message: `at most ${RULESET_MAX_COUNT} rulesets allowed` });
+    errors.push({ path: '/data_sources/rule_sets', message: `at most ${RULESET_MAX_COUNT} rule-sets allowed` });
     return;
   }
   for (const name of names) {
-    const path = `/data_sources/rulesets/${name}`;
+    const path = `/data_sources/rule_sets/${name}`;
     if (name.length > 64 || !RULESET_NAME_RE.test(name)) {
-      errors.push({ path, message: 'invalid ruleset name' });
+      errors.push({ path, message: 'invalid rule-set name' });
       continue;
     }
     const stream = rulesets[name];
@@ -214,7 +214,7 @@ function semanticMatcher(matcher, path, errors) {
   switch (matcher.type) {
     case 'geosite':
     case 'geoip':
-    case 'ruleset':
+    case 'rule-set':
       if (typeof matcher.tag !== 'string' || !matcher.tag) {
         errors.push({ path: `${path}/tag`, message: 'must be a non-empty string' });
       }
@@ -347,7 +347,7 @@ export function mergeWithDefaults(partial) {
     data_sources: {
       geoip: { ...base.data_sources.geoip, ...(partial.data_sources?.geoip ?? {}) },
       geosite: { ...base.data_sources.geosite, ...(partial.data_sources?.geosite ?? {}) },
-      rulesets: normalizeRulesets(partial.data_sources?.rulesets),
+      rule_sets: normalizeRulesets(partial.data_sources?.rule_sets),
     },
     dns: { ...base.dns, ...(partial.dns ?? {}) },
     rules: Array.isArray(partial.rules) ? partial.rules.map(normalizeRule) : [],

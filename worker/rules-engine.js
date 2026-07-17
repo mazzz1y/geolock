@@ -111,7 +111,7 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
 
 function collectRulesetTags(m, out) {
   if (!m || typeof m !== 'object') return;
-  if (m.type === 'ruleset') {
+  if (m.type === 'rule-set') {
     const tag = String(m.tag ?? '');
     if (tag) out.add(tag);
     return;
@@ -125,7 +125,7 @@ function collectRulesetTags(m, out) {
 
 function matcherNeedsIp(m) {
   if (!m || typeof m !== 'object') return false;
-  if (m.type === 'geoip' || m.type === 'ip' || m.type === 'ruleset') return true;
+  if (m.type === 'geoip' || m.type === 'ip' || m.type === 'rule-set') return true;
   if (m.type === 'and' || m.type === 'or') {
     return Array.isArray(m.matches) && m.matches.some(matcherNeedsIp);
   }

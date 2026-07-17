@@ -46,7 +46,7 @@ async function bootstrap() {
   let rulesetNames = [];
   try {
     const config = await loadConfig();
-    rulesetNames = Object.keys(config.data_sources?.rulesets ?? {});
+    rulesetNames = Object.keys(config.data_sources?.rule_sets ?? {});
   } catch { /* ... */ }
 
   try { await geo.reloadAll(rulesetNames); }
@@ -62,7 +62,7 @@ async function bootstrap() {
   updater.updateIfStale('geosite').catch(() => {});
   updater.updateIfStale('remote').catch(() => {});
   for (const name of rulesetNames) {
-    updater.updateIfStale(`ruleset:${name}`).catch(() => {});
+    updater.updateIfStale(`rule-set:${name}`).catch(() => {});
   }
 }
 
@@ -82,8 +82,8 @@ browser.storage.onChanged.addListener((changes, area) => {
       updater.updateDat(kind).catch(() => {});
     }
   }
-  const nextRulesets = next.data_sources?.rulesets ?? {};
-  const prevRulesets = prev?.data_sources?.rulesets ?? {};
+  const nextRulesets = next.data_sources?.rule_sets ?? {};
+  const prevRulesets = prev?.data_sources?.rule_sets ?? {};
   const prevNames = Object.keys(prevRulesets);
   const nextNames = Object.keys(nextRulesets);
   if (nextNames.join('\n') !== prevNames.join('\n')) {
@@ -192,7 +192,7 @@ const handlers = {
         geoip: updater.getLastError('geoip') ?? geo.getReloadError('geoip'),
         geosite: updater.getLastError('geosite') ?? geo.getReloadError('geosite'),
         remote: updater.getLastError('remote'),
-        rulesets: updater.getRulesetErrors(),
+        rule_sets: updater.getRulesetErrors(),
       },
       updating: updater.getProgress(),
       remoteLastAppliedAt: stored?.remote_last_applied_at ?? null,

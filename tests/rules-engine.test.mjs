@@ -193,7 +193,7 @@ export const tests = [
       let resolved = 0;
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'r' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'rule-set', tag: 'r' }, action: 'block' }],
       };
       await evaluate(config, {
         source: { host: 'a', ips: [] }, destination: { host: 'b', ips: [] },
@@ -219,7 +219,7 @@ export const tests = [
       };
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'ads' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'rule-set', tag: 'ads' }, action: 'block' }],
       };
       const result = await evaluate(config, {
         source: { host: 'a' }, destination: { host: 'blocked.example' },
@@ -240,17 +240,17 @@ export const tests = [
         rules: [
           {
             enabled: true,
-            source: { type: 'not', match: { type: 'ruleset', tag: 'a' } },
+            source: { type: 'not', match: { type: 'rule-set', tag: 'a' } },
             destination: {
               type: 'and',
               matches: [
-                { type: 'or', matches: [{ type: 'ruleset', tag: 'b' }, { type: 'ruleset', tag: 'a' }] },
+                { type: 'or', matches: [{ type: 'rule-set', tag: 'b' }, { type: 'rule-set', tag: 'a' }] },
                 { type: 'any' },
               ],
             },
             action: 'block',
           },
-          { enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'a' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'rule-set', tag: 'a' }, action: 'block' },
         ],
       };
       await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, lazyGeo, {
@@ -267,7 +267,7 @@ export const tests = [
         default_action: 'allow',
         rules: [
           { enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' },
-          { enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'later' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'rule-set', tag: 'later' }, action: 'block' },
         ],
       };
       const result = await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, geo, {
@@ -283,7 +283,7 @@ export const tests = [
       const lazyGeo = { ...geo, inRuleset: () => null };
       const config = {
         default_action: 'allow',
-        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'broken' }, action: 'block' }],
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'rule-set', tag: 'broken' }, action: 'block' }],
       };
       const result = await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, lazyGeo, {
         ensureRuleset: async () => { throw new Error('decode failed'); },

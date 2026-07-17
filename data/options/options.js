@@ -184,7 +184,7 @@ function describeMatcher(matcher) {
     case 'any': return 'ANY';
     case 'geosite': return `geosite:${matcher.tag}${matcher.attr ? '@' + matcher.attr : ''}`;
     case 'geoip':   return `geoip:${matcher.tag}`;
-    case 'ruleset': return `ruleset:${matcher.tag}`;
+    case 'rule-set': return `rule-set:${matcher.tag}`;
     case 'domain':  return `domain:/${matcher.regex}/`;
     case 'url':     return `url:/${matcher.regex}/`;
     case 'ip':      return `ip:${matcher.cidr}`;
@@ -414,8 +414,8 @@ function createMatcherEditor(node) {
       return;
     }
 
-    if (node.type === 'ruleset') {
-      const names = Object.keys(currentConfig?.data_sources?.rulesets ?? {});
+    if (node.type === 'rule-set') {
+      const names = Object.keys(currentConfig?.data_sources?.rule_sets ?? {});
       if (names.length > 0) {
         const select = elem('select', { 'aria-label': 'Rule-set name' });
         if (node.tag && !names.includes(node.tag)) {
@@ -524,7 +524,7 @@ const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
 
 function renderDataCard(status, errors, updating = {}) {
   const allBtn = $('data-update-all');
-  const anyUpdating = !!(updating.geoip || updating.geosite || (updating.rulesets ?? []).length > 0);
+  const anyUpdating = !!(updating.geoip || updating.geosite || (updating.rule_sets ?? []).length > 0);
   allBtn.disabled = anyUpdating;
   allBtn.textContent = anyUpdating ? 'Updating…' : 'Update all';
 
@@ -591,16 +591,16 @@ function renderDataCard(status, errors, updating = {}) {
 function renderRulesets(status, errors, updating) {
   const host = $('data-rulesets');
   host.replaceChildren();
-  const rulesets = currentConfig?.data_sources?.rulesets ?? {};
+  const rulesets = currentConfig?.data_sources?.rule_sets ?? {};
   const names = Object.keys(rulesets);
-  const statusByName = new Map((status?.rulesets ?? []).map(item => [item.name, item]));
-  const updatingNames = new Set(updating?.rulesets ?? []);
+  const statusByName = new Map((status?.rule_sets ?? []).map(item => [item.name, item]));
+  const updatingNames = new Set(updating?.rule_sets ?? []);
   for (const name of names) {
     host.appendChild(renderRulesetRow(
       name,
       rulesets[name] ?? {},
       statusByName.get(name),
-      errors?.rulesets?.[name],
+      errors?.rule_sets?.[name],
       updatingNames.has(name),
     ));
   }
@@ -644,7 +644,7 @@ async function saveRulesetDraft() {
     errorNode.textContent = 'Name must match [a-z0-9][a-z0-9_-]* (max 64 chars)';
     return;
   }
-  if (currentConfig?.data_sources?.rulesets?.[name]) {
+  if (currentConfig?.data_sources?.rule_sets?.[name]) {
     errorNode.textContent = 'A rule-set with this name already exists';
     return;
   }
@@ -654,8 +654,8 @@ async function saveRulesetDraft() {
   }
   errorNode.textContent = '';
   const ok = await mutate(next => {
-    next.data_sources.rulesets = {
-      ...(next.data_sources.rulesets ?? {}),
+    next.data_sources.rule_sets = {
+      ...(next.data_sources.rule_sets ?? {}),
       [name]: { url, sha256_url: '', auto_update: true, interval_hours: 24 },
     };
   });
@@ -705,7 +705,7 @@ function renderRulesetRow(name, source, meta, error, isUpdating) {
       elem('div', { class: 'row-actions' },
         elem('span', { id: `data-ruleset-${name}-status`, class: 'status-text muted', 'aria-live': 'polite' }),
         button('Save', () => saveRuleset(name)),
-        button(isUpdating ? 'Updating…' : 'Update', () => triggerDataUpdate(`ruleset:${name}`), {
+        button(isUpdating ? 'Updating…' : 'Update', () => triggerDataUpdate(`rule-set:${name}`), {
           disabled: isUpdating || !source.url,
           title: source.url ? '' : 'Set a URL first',
         }),
@@ -732,7 +732,7 @@ function describeRulesetStatus(meta, error, isUpdating) {
 
 function readRulesetForm(name) {
   const host = document.querySelector(`[data-ruleset="${CSS.escape(name)}"]`);
-  const existing = currentConfig?.data_sources?.rulesets?.[name] ?? {};
+  const existing = currentConfig?.data_sources?.rule_sets?.[name] ?? {};
   return {
     ...existing,
     url: host.querySelector('[data-field="url"]').value.trim(),
@@ -745,7 +745,7 @@ function readRulesetForm(name) {
 async function saveRuleset(name) {
   const form = readRulesetForm(name);
   const ok = await mutate(next => {
-    next.data_sources.rulesets = { ...(next.data_sources.rulesets ?? {}), [name]: form };
+    next.data_sources.rule_sets = { ...(next.data_sources.rule_sets ?? {}), [name]: form };
   });
   if (ok) flashStatus(`data-ruleset-${name}-status`, 'Saved', 'ok', 2000);
   else setStatus(`data-ruleset-${name}-status`, 'Invalid values', 'error');
@@ -754,7 +754,7 @@ async function saveRuleset(name) {
 async function removeRuleset(name) {
   if (!confirm(`Remove rule-set "${name}"?`)) return;
   await mutate(next => {
-    if (next.data_sources.rulesets) delete next.data_sources.rulesets[name];
+    if (next.data_sources.rule_sets) delete next.data_sources.rule_sets[name];
   });
   await refreshData();
 }
@@ -781,8 +781,8 @@ async function saveAllDataSources() {
   const ok = await mutate(next => {
     next.data_sources.geoip = readDataSourceForm('geoip');
     next.data_sources.geosite = readDataSourceForm('geosite');
-    for (const name of Object.keys(next.data_sources.rulesets ?? {})) {
-      next.data_sources.rulesets[name] = readRulesetForm(name);
+    for (const name of Object.keys(next.data_sources.rule_sets ?? {})) {
+      next.data_sources.rule_sets[name] = readRulesetForm(name);
     }
   });
   if (ok) flashStatus('data-save-all-status', 'Saved', 'ok', 2000);

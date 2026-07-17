@@ -6,7 +6,7 @@ import { saveConfig, loadConfig, validateConfig, loadRemoteSettings } from './co
 import { migrate } from './config/migrations.js';
 
 const DAT_KEY = { geoip: 'geoip.dat', geosite: 'geosite.dat' };
-export const RULESET_PREFIX = 'ruleset:';
+export const RULESET_PREFIX = 'rule-set:';
 const HEARTBEAT_ALARM = 'geolock-update-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 60;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -55,10 +55,10 @@ export function updateRuleset(name) {
 }
 
 async function runUpdateRuleset(name) {
-  const key = `ruleset:${name}`;
+  const key = `rule-set:${name}`;
   const config = await loadConfig();
-  const source = config.data_sources?.rulesets?.[name];
-  if (!source?.url) throw new Error(`ruleset ${name}: url not configured`);
+  const source = config.data_sources?.rule_sets?.[name];
+  if (!source?.url) throw new Error(`rule-set ${name}: url not configured`);
 
   notifyDataChanged();
   try {
@@ -81,7 +81,7 @@ async function runUpdateRuleset(name) {
     try {
       await parseRuleSet(bytes);
     } catch (error) {
-      throw fail(key, `ruleset ${name}: parse failed (${error.message ?? error})`);
+      throw fail(key, `rule-set ${name}: parse failed (${error.message ?? error})`);
     }
 
     await saveBlob(key, bytes, {
@@ -91,7 +91,7 @@ async function runUpdateRuleset(name) {
       savedAt: now,
     });
     if (!await geo.reloadRuleset(name)) {
-      throw fail(key, `ruleset ${name}: reload after save returned no index`);
+      throw fail(key, `rule-set ${name}: reload after save returned no index`);
     }
     rulesetLastError[name] = null;
     return { unchanged: false, byteLength: bytes.length };
@@ -256,11 +256,11 @@ export async function updateAll() {
     .map(kind => updateDat(kind)
       .then(value => [kind, value])
       .catch(error => [kind, { error: String(error.message ?? error) }]));
-  for (const [name, stream] of Object.entries(config.data_sources?.rulesets ?? {})) {
+  for (const [name, stream] of Object.entries(config.data_sources?.rule_sets ?? {})) {
     if (!stream?.url) continue;
     tasks.push(updateRuleset(name)
-      .then(value => [`ruleset:${name}`, value])
-      .catch(error => [`ruleset:${name}`, { error: String(error.message ?? error) }]));
+      .then(value => [`rule-set:${name}`, value])
+      .catch(error => [`rule-set:${name}`, { error: String(error.message ?? error) }]));
   }
   return Object.fromEntries(await Promise.all(tasks));
 }
@@ -278,9 +278,9 @@ export async function updateIfStale(kind) {
   }
   if (kind.startsWith(RULESET_PREFIX)) {
     const name = kind.slice(RULESET_PREFIX.length);
-    const source = config.data_sources?.rulesets?.[name];
+    const source = config.data_sources?.rule_sets?.[name];
     if (!shouldAutoUpdate(source)) return { skipped: 'disabled' };
-    const meta = await loadBlobMeta(`ruleset:${name}`);
+    const meta = await loadBlobMeta(`rule-set:${name}`);
     if (meta?.savedAt && !isStale({ lastCheckedAt: meta.savedAt, intervalHours: source.interval_hours })) {
       return { skipped: 'fresh' };
     }
@@ -314,8 +314,8 @@ export async function handleAlarm(alarm) {
   ];
   try {
     const config = await loadConfig();
-    for (const name of Object.keys(config.data_sources?.rulesets ?? {})) {
-      tasks.push(updateIfStale(`ruleset:${name}`));
+    for (const name of Object.keys(config.data_sources?.rule_sets ?? {})) {
+      tasks.push(updateIfStale(`rule-set:${name}`));
     }
   } catch { /* ... */ }
   await Promise.allSettled(tasks);
@@ -339,6 +339,6 @@ export function getProgress() {
     geoip: !!inFlight.geoip,
     geosite: !!inFlight.geosite,
     remote: !!inFlight.remote,
-    rulesets: [...rulesetInFlight.keys()],
+    rule_sets: [...rulesetInFlight.keys()],
   };
 }

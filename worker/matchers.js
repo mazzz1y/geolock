@@ -40,7 +40,7 @@ export function matches(matcher, ctx, geo, trace = null) {
       return matchGeosite(matcher, ctx, geo, trace);
     case 'geoip':
       return matchGeoip(matcher, ctx, geo, trace);
-    case 'ruleset':
+    case 'rule-set':
       return matchRuleset(matcher, ctx, geo, trace);
     case 'domain':
       return matchDomain(matcher, ctx, trace);
@@ -107,15 +107,15 @@ function matchRuleset(matcher, ctx, geo, trace) {
   const host = ctx?.host ?? '';
   const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
   if (!tag) {
-    trace?.push({ type: 'ruleset', tag, host, ips: ips.map(formatIp), hit: false, note: 'empty tag' });
+    trace?.push({ type: 'rule-set', tag, host, ips: ips.map(formatIp), hit: false, note: 'empty tag' });
     return false;
   }
   const raw = geo.inRuleset(tag, host, ips);
   if (raw === null) {
-    trace?.push({ type: 'ruleset', tag, host, ips: ips.map(formatIp), hit: null, note: 'ruleset not loaded' });
+    trace?.push({ type: 'rule-set', tag, host, ips: ips.map(formatIp), hit: null, note: 'rule-set not loaded' });
     return UNDECIDED;
   }
-  trace?.push({ type: 'ruleset', tag, host, ips: ips.map(formatIp), hit: raw });
+  trace?.push({ type: 'rule-set', tag, host, ips: ips.map(formatIp), hit: raw });
   return raw;
 }
 

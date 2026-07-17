@@ -122,7 +122,7 @@ const rulesets = new Map();
 let configuredRulesetNames = [];
 
 async function initRuleset(name) {
-  const key = `ruleset:${name}`;
+  const key = `rule-set:${name}`;
   try {
     const { bytes, meta } = await loadBlob(key);
     if (!bytes || !meta?.bodyHash) {
@@ -319,7 +319,7 @@ function computeGeositeMatch(host, tag, attr) {
 }
 
 export function status() {
-  return { geoip: geoip.status(), geosite: geosite.status(), rulesets: rulesetsStatus() };
+  return { geoip: geoip.status(), geosite: geosite.status(), rule_sets: rulesetsStatus() };
 }
 
 export function getReloadError(kind) {

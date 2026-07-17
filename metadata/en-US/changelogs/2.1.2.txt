@@ -1,0 +1,1 @@
+- Rename the "ruleset" matcher type to "rule-set" and the data-source key to rule_sets
