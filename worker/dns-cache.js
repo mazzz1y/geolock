@@ -1,5 +1,7 @@
 import { parseIp } from '../lib/ip.js';
 
+const TIMEOUT = Symbol('timeout');
+
 const DEFAULTS = {
   ttlMs: 300_000,
   negativeTtlMs: 30_000,
@@ -20,6 +22,7 @@ export function createDnsCache({
   const entries = new Map();
   const inFlight = new Map();
   const stats = { hits: 0, misses: 0, timeouts: 0 };
+  let generation = 0;
   const opts = { ttlMs, negativeTtlMs, timeoutMs, maxEntries };
 
   function touch(host, entry) {
@@ -46,9 +49,11 @@ export function createDnsCache({
 
     stats.misses += 1;
     const promise = resolveWithTimeout(key)
-      .then(ips => {
-        const ttl = ips.length ? opts.ttlMs : opts.negativeTtlMs;
-        if (ttl > 0) touch(key, { ips, expiresAt: now() + ttl });
+      .then(({ ips, timedOut }) => {
+        if (!timedOut) {
+          const ttl = ips.length ? opts.ttlMs : opts.negativeTtlMs;
+          if (ttl > 0) touch(key, { ips, expiresAt: now() + ttl });
+        }
         return ips;
       })
       .finally(() => { inFlight.delete(key); });
@@ -57,25 +62,39 @@ export function createDnsCache({
     return promise;
   }
 
+  function parseAddresses(result) {
+    const addresses = Array.isArray(result?.addresses) ? result.addresses
+      : Array.isArray(result) ? result
+      : [];
+    const parsed = [];
+    for (const addr of addresses) {
+      const ip = parseIp(addr);
+      if (ip) parsed.push(ip);
+    }
+    return parsed;
+  }
+
   async function resolveWithTimeout(host) {
     let timer = null;
     const timeout = new Promise(resolve => {
-      timer = setTimer(() => { stats.timeouts += 1; resolve(null); }, opts.timeoutMs);
+      timer = setTimer(() => { stats.timeouts += 1; resolve(TIMEOUT); }, opts.timeoutMs);
     });
+    const resolution = Promise.resolve().then(() => resolver(host));
     try {
-      const result = await Promise.race([resolver(host), timeout]);
-      if (result === null) return [];
-      const addresses = Array.isArray(result?.addresses) ? result.addresses
-        : Array.isArray(result) ? result
-        : [];
-      const parsed = [];
-      for (const addr of addresses) {
-        const ip = parseIp(addr);
-        if (ip) parsed.push(ip);
+      const result = await Promise.race([resolution, timeout]);
+      if (result === TIMEOUT) {
+        const startedGeneration = generation;
+        resolution.then(late => {
+          if (generation !== startedGeneration) return;
+          const ips = parseAddresses(late);
+          const ttl = ips.length ? opts.ttlMs : opts.negativeTtlMs;
+          if (ttl > 0) touch(host, { ips, expiresAt: now() + ttl });
+        }).catch(() => {});
+        return { ips: [], timedOut: true };
       }
-      return parsed;
+      return { ips: parseAddresses(result), timedOut: false };
     } catch {
-      return [];
+      return { ips: [], timedOut: false };
     } finally {
       if (timer !== null) clearTimer(timer);
     }
@@ -89,6 +108,7 @@ export function createDnsCache({
   }
 
   function clearCache() {
+    generation += 1;
     entries.clear();
     inFlight.clear();
     stats.hits = 0;

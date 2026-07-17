@@ -9,37 +9,39 @@ import * as badge from './worker/badge.js';
 
 function applyDnsConfig(dns) {
   if (!dns) return;
-  dnsCache.setOptions({
-    ttlMs: (dns.cache_ttl_seconds ?? 0) * 1000,
-    negativeTtlMs: (dns.negative_cache_ttl_seconds ?? 0) * 1000,
-    timeoutMs: dns.timeout_ms,
-  });
+  const options = {};
+  if (dns.cache_ttl_seconds != null) options.ttlMs = dns.cache_ttl_seconds * 1000;
+  if (dns.negative_cache_ttl_seconds != null) options.negativeTtlMs = dns.negative_cache_ttl_seconds * 1000;
+  if (dns.timeout_ms != null) options.timeoutMs = dns.timeout_ms;
+  dnsCache.setOptions(options);
 }
 
 async function bootstrap() {
-  let config;
   try {
-    config = await loadConfig();
-  } catch (error) {
-    console.error('GeoLock: loadConfig failed, falling back to defaults:', error);
-    config = defaultConfig();
+    let config;
+    try {
+      config = await loadConfig();
+    } catch (error) {
+      console.error('GeoLock: loadConfig failed, falling back to defaults:', error);
+      config = defaultConfig();
+    }
+
+    enforcer.setConfig(config);
+    applyDnsConfig(config.dns);
+    badge.init();
+
+    try {
+      const tabs = await browser.tabs.query({});
+      const activeIds = new Set(tabs.map(t => t?.id).filter(id => Number.isInteger(id) && id >= 0));
+      await blockLog.restore(activeIds);
+      for (const id of activeIds) badge.updateBadge(id);
+    } catch (error) {
+      console.error('GeoLock block-log restore failed:', error);
+      badge.resetAllTabs().catch(() => {});
+    }
+  } finally {
+    enforcer.markReady();
   }
-
-  enforcer.setConfig(config);
-  applyDnsConfig(config.dns);
-  badge.init();
-
-  try {
-    const tabs = await browser.tabs.query({});
-    const activeIds = new Set(tabs.map(t => t?.id).filter(id => Number.isInteger(id) && id >= 0));
-    await blockLog.restore(activeIds);
-    for (const id of activeIds) badge.updateBadge(id);
-  } catch (error) {
-    console.error('GeoLock block-log restore failed:', error);
-    badge.resetAllTabs().catch(() => {});
-  }
-
-  enforcer.markReady();
 
   try { await geo.reloadAll(); }
   catch (error) {

@@ -17,6 +17,11 @@ const fakeGeo = {
   },
 };
 
+const absentGeo = {
+  inGeoipTag() { return null; },
+  inGeositeTag() { return null; },
+};
+
 export const tests = [
   {
     name: 'any matches anything',
@@ -153,6 +158,22 @@ export const tests = [
       const m = { type: 'or', matches: [{ type: 'geosite', tag: 'google' }, { type: 'geoip', tag: 'cn' }] };
       assert.equal(matches(m, { host: '', ips: [parseIp('1.1.1.1')] }, fakeGeo), true);
       assert.equal(matches(m, { host: '', ips: [parseIp('8.8.8.8')] }, fakeGeo), UNDECIDED);
+    },
+  },
+  {
+    name: 'tri-state: geo matchers return UNDECIDED when db not loaded',
+    run: () => {
+      assert.equal(matches({ type: 'geoip', tag: 'cn' }, { ips: [parseIp('1.1.1.1')] }, absentGeo), UNDECIDED);
+      assert.equal(matches({ type: 'geosite', tag: 'google' }, { host: 'search.example' }, absentGeo), UNDECIDED);
+      const trace = [];
+      matches({ type: 'geoip', tag: 'cn' }, { ips: [parseIp('1.1.1.1')] }, absentGeo, trace);
+      assert.equal(trace[0].hit, null);
+    },
+  },
+  {
+    name: 'tri-state: not(geo matcher) with absent db stays UNDECIDED',
+    run: () => {
+      assert.equal(matches({ type: 'not', match: { type: 'geoip', tag: 'cn' } }, { ips: [parseIp('1.1.1.1')] }, absentGeo), UNDECIDED);
     },
   },
   {

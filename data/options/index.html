@@ -107,6 +107,7 @@
           </label>
         </div>
         <p id="remote-last-fetched" class="muted small"></p>
+        <p id="remote-error" class="error small" aria-live="polite"></p>
         <div class="card-actions">
           <button id="remote-save">Save</button>
           <button id="remote-fetch" class="primary">Fetch now</button>
@@ -174,9 +175,9 @@
             <option value="allow">Allow</option>
           </select>
         </label>
-        <p id="rule-error" class="error"></p>
+        <p id="rule-error" class="error" role="alert"></p>
         <menu>
-          <button value="cancel">Cancel</button>
+          <button type="button" id="rule-cancel">Cancel</button>
           <button id="rule-save" value="save" class="primary">Save</button>
         </menu>
       </form>

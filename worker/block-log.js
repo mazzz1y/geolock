@@ -52,6 +52,7 @@ export function getForTab(tabId) {
 export function clearTab(tabId) {
   const had = log.delete(tabId);
   const hadUrl = lastUrl.delete(tabId);
+  if (!restored) return null;
   if (had || hadUrl) return flushNow();
   return null;
 }

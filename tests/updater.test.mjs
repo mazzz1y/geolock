@@ -1,7 +1,40 @@
 import assert from 'node:assert/strict';
-import { isStale, shouldAutoUpdate, parseSha256Sum, mergeDataSources, fetchWithTimeout } from '../worker/updater.js';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { installFakeIndexedDB } from './fixtures/fake-idb.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const idbData = installFakeIndexedDB();
+
+const localStore = new Map();
+globalThis.browser = globalThis.browser ?? {};
+globalThis.browser.storage = {
+  local: {
+    get: async key => {
+      const keys = typeof key === 'string' ? [key] : Array.isArray(key) ? key : [];
+      const out = {};
+      for (const k of keys) if (localStore.has(k)) out[k] = localStore.get(k);
+      return out;
+    },
+    set: async obj => {
+      for (const [k, v] of Object.entries(obj)) localStore.set(k, v);
+    },
+  },
+};
+globalThis.browser.runtime = { sendMessage: () => Promise.resolve() };
+
+const { isStale, shouldAutoUpdate, parseSha256Sum, fetchWithTimeout, updateRemoteConfig, updateDat } =
+  await import('../worker/updater.js');
+const { loadConfig, saveConfig, saveRemoteSettings } = await import('../worker/config.js');
 
 const HOUR = 3600 * 1000;
+
+function withFetch(fn, body) {
+  const original = globalThis.fetch;
+  globalThis.fetch = fn;
+  return Promise.resolve(body()).finally(() => { globalThis.fetch = original; });
+}
 
 export const tests = [
   {
@@ -84,26 +117,6 @@ export const tests = [
     },
   },
   {
-    name: 'mergeDataSources: incoming overrides current',
-    run: () => {
-      const current = { geoip: { url: 'a', interval_hours: 24 }, geosite: { url: 'b' } };
-      const incoming = { geoip: { url: 'a2' }, geosite: { url: 'b2' } };
-      const merged = mergeDataSources(current, incoming);
-      assert.equal(merged.geoip.url, 'a2');
-      assert.equal(merged.geoip.interval_hours, 24);
-      assert.equal(merged.geosite.url, 'b2');
-    },
-  },
-  {
-    name: 'mergeDataSources: missing kind in incoming keeps current',
-    run: () => {
-      const current = { geoip: { url: 'a' }, geosite: { url: 'b' } };
-      const merged = mergeDataSources(current, { geoip: { url: 'a2' } });
-      assert.equal(merged.geoip.url, 'a2');
-      assert.equal(merged.geosite.url, 'b');
-    },
-  },
-  {
     name: 'fetchWithTimeout: aborts when fetch never resolves',
     run: async () => {
       const originalFetch = globalThis.fetch;
@@ -132,6 +145,83 @@ export const tests = [
       } finally {
         globalThis.fetch = originalFetch;
       }
+    },
+  },
+  {
+    name: 'fetchWithTimeout: timeout covers body download',
+    run: async () => {
+      const fetchStub = async (_url, init) => ({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        }),
+      });
+      await withFetch(fetchStub, () => assert.rejects(
+        () => fetchWithTimeout('https://slow-body.example/', { timeoutMs: 5, readBody: r => r.arrayBuffer() }),
+        err => err?.name === 'AbortError',
+      ));
+    },
+  },
+  {
+    name: 'fetchWithTimeout: readBody returns body while timer live',
+    run: async () => {
+      const fetchStub = async () => ({ ok: true, status: 200, text: async () => 'payload' });
+      await withFetch(fetchStub, async () => {
+        const { response, body } = await fetchWithTimeout('https://x.example/', { readBody: r => r.text() });
+        assert.equal(response.ok, true);
+        assert.equal(body, 'payload');
+      });
+    },
+  },
+  {
+    name: 'updateDat: hashes downloaded file only once',
+    run: async () => {
+      idbData.clear();
+      localStore.clear();
+      const bytes = new Uint8Array(await readFile(join(here, 'fixtures', 'tiny-geoip.dat')));
+      const config = await loadConfig();
+      config.data_sources.geoip.url = 'https://dat.example/geoip.dat';
+      await saveConfig(config);
+      const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+      let digestCalls = 0;
+      crypto.subtle.digest = (...args) => { digestCalls += 1; return originalDigest(...args); };
+      const fetchStub = async () => ({ ok: true, status: 200, arrayBuffer: async () => bytes.buffer.slice(0) });
+      try {
+        await withFetch(fetchStub, () => updateDat('geoip'));
+        assert.equal(digestCalls, 1);
+        assert.equal(idbData.get('geoip.dat:meta').bodyHash.length, 64);
+      } finally {
+        crypto.subtle.digest = originalDigest;
+      }
+    },
+  },
+  {
+    name: 'remote config: data_sources fully replaced by remote',
+    run: async () => {
+      idbData.clear();
+      localStore.clear();
+      const config = await loadConfig();
+      config.data_sources.geoip = { url: 'https://local.example/geoip.dat', auto_update: false, interval_hours: 6, sha256_url: 'https://local.example/geoip.sha256' };
+      config.data_sources.geosite.url = 'https://local.example/geosite.dat';
+      await saveConfig(config);
+      await saveRemoteSettings({ url: 'https://remote.example/config.json' });
+      const remoteJson = JSON.stringify({
+        version: 2,
+        default_action: 'block',
+        dns: {},
+        rules: [],
+        data_sources: { geoip: { url: 'https://remote.example/geoip.dat' } },
+      });
+      const fetchStub = async () => ({ ok: true, status: 200, text: async () => remoteJson });
+      await withFetch(fetchStub, () => updateRemoteConfig());
+      const applied = await loadConfig();
+      assert.equal(applied.default_action, 'block');
+      assert.equal(applied.data_sources.geoip.url, 'https://remote.example/geoip.dat');
+      assert.equal(applied.data_sources.geoip.auto_update, true);
+      assert.equal(applied.data_sources.geoip.interval_hours, 24);
+      assert.equal(applied.data_sources.geoip.sha256_url, '');
+      assert.equal(applied.data_sources.geosite.url, '');
     },
   },
 ];

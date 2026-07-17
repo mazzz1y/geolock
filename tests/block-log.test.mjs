@@ -410,6 +410,25 @@ export const tests = [
     },
   },
   {
+    name: 'clearTab before restore does not write to storage',
+    run: async () => {
+      const fresh = await import('../worker/block-log.js?fresh-cleartab');
+      sessionStore.set('block_log_v2', {
+        log: { 100: [makeEntry()] },
+        lastUrl: { 100: 'https://example.com/' },
+      });
+      setCalls = 0;
+      const flush = fresh.clearTab(100);
+      assert.equal(flush, null);
+      await new Promise(r => setTimeout(r, 0));
+      assert.equal(setCalls, 0, 'persisted state must survive early tab removal');
+      assert.ok(sessionStore.get('block_log_v2').log['100']);
+      await fresh.restore(new Set([100]));
+      assert.equal(fresh.count(100), 1);
+      sessionStore.delete('block_log_v2');
+    },
+  },
+  {
     name: 'flushNow swallows storage errors',
     run: async () => {
       resetAll();

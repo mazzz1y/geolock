@@ -378,13 +378,94 @@ export const tests = [
     },
   },
   {
+    name: 'evaluateRequest: bare-TLD source is not same-site with domain under it',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' }],
+      };
+      const frames = framesWith(7, 0, { host: 'com', url: 'https://com/', parentFrameId: -1 });
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://evil.com/x.png', tabId: 7, frameId: 0,
+      }, baseDeps({ config, frames }));
+      assert.equal(result.verdict, 'block');
+    },
+  },
+  {
+    name: 'evaluateRequest: bracketed IPv6 destination host is unwrapped for IP matching',
+    run: async () => {
+      const config = {
+        default_action: 'allow',
+        dns: { match_strategy: 'all' },
+        rules: [{
+          enabled: true,
+          source: { type: 'any' },
+          destination: { type: 'ip', cidr: '2001:db8::/32' },
+          action: 'block',
+        }],
+      };
+      let calls = 0;
+      const dnsLookup = async () => { calls += 1; return []; };
+      const result = await evaluateRequest({
+        type: 'image', url: 'https://[2001:db8::1]/x', tabId: -1, frameId: -1,
+        documentUrl: 'https://owner.example/p',
+      }, baseDeps({ config, dnsLookup }));
+      assert.equal(result.verdict, 'block');
+      assert.equal(calls, 0);
+    },
+  },
+  {
+    name: 'deriveSourceContext: sub-resource prefers documentUrl over stale frame entry',
+    run: () => {
+      const frames = framesWith(9, 3, { host: 'stale.example', url: 'https://stale.example/x', parentFrameId: 0 });
+      const ctx = deriveSourceContext({
+        tabId: 9, frameId: 3, type: 'image',
+        documentUrl: 'https://fresh.example/doc',
+        url: 'https://r/',
+      }, frames);
+      assert.equal(ctx.host, 'fresh.example');
+      assert.equal(ctx.url, 'https://fresh.example/doc');
+    },
+  },
+  {
+    name: 'deriveSourceContext: sub-resource without documentUrl falls back to frames map',
+    run: () => {
+      const frames = framesWith(9, 3, { host: 'frame.example', url: 'https://frame.example/x', parentFrameId: 0 });
+      const ctx = deriveSourceContext({
+        tabId: 9, frameId: 3, type: 'image',
+        url: 'https://r/',
+      }, frames);
+      assert.equal(ctx.host, 'frame.example');
+    },
+  },
+  {
     name: 'verdict cache: put then take returns the same result and removes from cache',
     run: () => {
       const result = { verdict: 'block', matchedRule: { index: 0, name: 'r' } };
-      cachePutVerdict('req-1', result);
-      const taken = cacheTakeVerdict('req-1');
+      cachePutVerdict('req-1', result, 'https://a.test/');
+      const taken = cacheTakeVerdict('req-1', 'https://a.test/');
       assert.equal(taken, result);
-      assert.equal(cacheTakeVerdict('req-1'), undefined);
+      assert.equal(cacheTakeVerdict('req-1', 'https://a.test/'), undefined);
+    },
+  },
+  {
+    name: 'verdict cache: take with mismatched URL returns undefined and drops entry',
+    run: () => {
+      const result = { verdict: 'block', matchedRule: { index: 0, name: 'r' } };
+      cachePutVerdict('req-redirect', result, 'https://before.test/');
+      assert.equal(cacheTakeVerdict('req-redirect', 'https://after.test/'), undefined);
+      assert.equal(cacheTakeVerdict('req-redirect', 'https://before.test/'), undefined);
+    },
+  },
+  {
+    name: 'verdict cache: put overwrites existing entry for reused requestId',
+    run: () => {
+      cachePutVerdict('req-reused', { verdict: 'block', n: 1 }, 'https://a.test/');
+      cachePutVerdict('req-reused', { verdict: 'block', n: 2 }, 'https://b.test/');
+      assert.equal(cacheTakeVerdict('req-reused', 'https://a.test/'), undefined);
+      cachePutVerdict('req-reused', { verdict: 'block', n: 3 }, 'https://c.test/');
+      assert.equal(cacheTakeVerdict('req-reused', 'https://c.test/').n, 3);
     },
   },
   {
@@ -414,12 +495,6 @@ export const tests = [
       assert.equal(_verdictCacheSize(), 100);
       assert.equal(cacheTakeVerdict('r-0'), undefined, 'oldest entry evicted');
       assert.ok(cacheTakeVerdict('r-100'), 'newest entry retained');
-    },
-  },
-  {
-    name: 'verdict cache: take returns undefined for ids that were never cached',
-    run: () => {
-      assert.equal(cacheTakeVerdict('phantom-id'), undefined);
     },
   },
   {

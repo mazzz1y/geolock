@@ -104,6 +104,58 @@ export const tests = [
     },
   },
   {
+    name: 'flat domain suffix tree: matchesAny agrees with lookup across kinds',
+    run: () => {
+      const b = new FlatDomainSuffixTreeBuilder();
+      b.addFull('exact.example.com', 1);
+      b.addSuffix('search.example', 2);
+      b.addPlain('shop', 3);
+      b.addRegex('^cdn\\.static\\.', 4);
+      b.addRegex('[', 5);
+      const t = b.finish();
+      const hosts = [
+        'exact.example.com', 'not-exact.example.com',
+        'mail.search.example', 'search.example', 'notsearch.example',
+        'www.shop.example', 'plain.example',
+        'cdn.static.example', 'cdn.dynamic.example',
+        'EXACT.EXAMPLE.COM',
+      ];
+      for (const host of hosts) {
+        assert.equal(t.matchesAny(host), t.lookup(host).size > 0, host);
+      }
+    },
+  },
+  {
+    name: 'flat domain suffix tree: matchesAny escapes plain needle metachars',
+    run: () => {
+      const b = new FlatDomainSuffixTreeBuilder();
+      b.addPlain('a.b', 1);
+      b.addPlain('x-y', 2);
+      b.addPlain('c+d', 3);
+      const t = b.finish();
+      assert.equal(t.matchesAny('foo.a.b.example'), true);
+      assert.equal(t.matchesAny('axb.example'), false);
+      assert.equal(t.matchesAny('foo.x-y.example'), true);
+      assert.equal(t.matchesAny('foo.c+d.example'), true);
+      assert.equal(t.matchesAny('foo.ccd.example'), false);
+      for (const host of ['foo.a.b.example', 'axb.example', 'foo.c+d.example', 'foo.ccd.example']) {
+        assert.equal(t.matchesAny(host), t.lookup(host).size > 0, host);
+      }
+    },
+  },
+  {
+    name: 'flat domain suffix tree: matchesAny chunks large plain sets',
+    run: () => {
+      const b = new FlatDomainSuffixTreeBuilder();
+      for (let i = 0; i < 1200; i += 1) b.addPlain(`needle-${i}.z`, i);
+      const t = b.finish();
+      assert.equal(t.matchesAny('www.needle-0.z.example'), true);
+      assert.equal(t.matchesAny('www.needle-1199.z.example'), true);
+      assert.equal(t.matchesAny('www.needle-1200.z.example'), false);
+      assert.equal(t.plainChunks.length, 3);
+    },
+  },
+  {
     name: 'flat domain suffix tree builder: multiple entryIds per key',
     run: () => {
       const b = new FlatDomainSuffixTreeBuilder();

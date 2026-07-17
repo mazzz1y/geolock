@@ -70,7 +70,7 @@ export function serializeMatcher(node) {
       return { type: 'not', match: serializeMatcher((node.children ?? [])[0] ?? { type: 'any' }) };
     case '__advanced__':
       try { return JSON.parse(node.json ?? '{}'); }
-      catch { return { type: 'any' }; }
+      catch (error) { throw new Error(`raw matcher JSON is invalid: ${error.message}`); }
     default:
       return { type: 'any' };
   }
@@ -78,10 +78,13 @@ export function serializeMatcher(node) {
 
 export function convertType(node, newType) {
   if (!node) return normalizeMatcher({ type: newType });
-  if (node.type === newType) return node;
+  if (node.type === newType) return { ...node, children: Array.isArray(node.children) ? [...node.children] : [] };
 
   if (newType === '__advanced__') {
-    return { type: '__advanced__', json: JSON.stringify(serializeMatcher(node), null, 2), children: [] };
+    let json;
+    try { json = JSON.stringify(serializeMatcher(node), null, 2); }
+    catch { json = node.json ?? '{}'; }
+    return { type: '__advanced__', json, children: [] };
   }
 
   if (node.type === '__advanced__') {
@@ -94,13 +97,13 @@ export function convertType(node, newType) {
 
   if (newType === 'and' || newType === 'or') {
     if (node.type === 'and' || node.type === 'or') {
-      return { type: newType, children: node.children ?? [] };
+      return { type: newType, children: [...(node.children ?? [])] };
     }
     return { type: newType, children: [cloneNode(node)] };
   }
 
   if (newType === 'not') {
-    return node.type === 'not' ? node : { type: 'not', children: [cloneNode(node)] };
+    return { type: 'not', children: [cloneNode(node)] };
   }
 
   return normalizeMatcher({ type: newType });

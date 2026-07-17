@@ -3,15 +3,26 @@ const STORE = 'blobs';
 
 const metaKey = key => `${key}:meta`;
 
+let dbPromise = null;
+
 function openDb() {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => {
       request.result.createObjectStore(STORE, { keyPath: 'key' });
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onclose = () => { dbPromise = null; };
+      resolve(db);
+    };
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
   });
+  return dbPromise;
 }
 
 async function withStore(mode, fn) {
@@ -39,18 +50,24 @@ export async function saveBlob(key, bytes, meta = {}) {
   });
 }
 
-export async function loadBlobBody(key) {
-  const db = await openDb();
-  const record = await awaitRequest(db.transaction(STORE, 'readonly').objectStore(STORE).get(key));
-  return record?.bytes ?? null;
-}
-
-export async function loadBlobMeta(key) {
-  const db = await openDb();
-  const record = await awaitRequest(db.transaction(STORE, 'readonly').objectStore(STORE).get(metaKey(key)));
+function stripKey(record) {
   if (!record) return null;
   const { key: _k, ...meta } = record;
   return meta;
 }
 
+export async function loadBlobMeta(key) {
+  const db = await openDb();
+  const record = await awaitRequest(db.transaction(STORE, 'readonly').objectStore(STORE).get(metaKey(key)));
+  return stripKey(record);
+}
 
+export async function loadBlob(key) {
+  const db = await openDb();
+  const store = db.transaction(STORE, 'readonly').objectStore(STORE);
+  const [bodyRecord, metaRecord] = await Promise.all([
+    awaitRequest(store.get(key)),
+    awaitRequest(store.get(metaKey(key))),
+  ]);
+  return { bytes: bodyRecord?.bytes ?? null, meta: stripKey(metaRecord) };
+}

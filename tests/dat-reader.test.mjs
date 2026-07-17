@@ -7,6 +7,11 @@ import {
   buildGeoipTagTrie, buildGeositeTagTrie,
 } from '../worker/geo/dat-reader.js';
 import { parseIp } from '../lib/ip.js';
+import { installFakeIndexedDB } from './fixtures/fake-idb.mjs';
+
+const idbData = installFakeIndexedDB();
+const geo = await import('../worker/geo/index.js');
+const { saveBlob } = await import('../worker/geo/store.js');
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -110,6 +115,91 @@ export const tests = [
         if (Array.isArray(google.attrs[id]) && google.attrs[id].includes('ads')) plainHasAds = true;
       }
       assert.equal(plainHasAds, false);
+    },
+  },
+  {
+    name: 'geo index: inGeoipTag/inGeositeTag return null before any db loaded',
+    run: async () => {
+      idbData.clear();
+      await geo.reloadAll();
+      assert.equal(geo.geoipReady(), false);
+      assert.equal(geo.geositeReady(), false);
+      assert.equal(geo.inGeoipTag(parseIp('8.8.8.42'), 'us'), null);
+      assert.equal(geo.inGeositeTag('foo.search.example', 'google'), null);
+    },
+  },
+  {
+    name: 'geo index: reload loads db and matchers return booleans',
+    run: async () => {
+      idbData.clear();
+      await saveBlob('geoip.dat', await loadGeoipBytes(), { bodyHash: 'h1' });
+      await saveBlob('geosite.dat', await loadGeositeBytes(), { bodyHash: 'h2' });
+      const status = await geo.reload('geoip');
+      assert.ok(status);
+      assert.equal(status.tagCount, 3);
+      assert.ok(await geo.reload('geosite'));
+      assert.equal(geo.geoipReady(), true);
+      assert.equal(geo.geositeReady(), true);
+      assert.equal(geo.inGeoipTag(parseIp('8.8.8.42'), 'us'), true);
+      assert.equal(geo.inGeoipTag(parseIp('9.9.9.9'), 'us'), false);
+      assert.equal(geo.inGeositeTag('foo.search.example', 'google'), true);
+      assert.equal(geo.inGeositeTag('other.example', 'google'), false);
+    },
+  },
+  {
+    name: 'geo index: failed reload keeps previous index and returns null',
+    run: async () => {
+      idbData.clear();
+      await saveBlob('geoip.dat', await loadGeoipBytes(), { bodyHash: 'h1' });
+      assert.ok(await geo.reload('geoip'));
+      await saveBlob('geoip.dat', new Uint8Array([0xff, 0xff, 0xff]), { bodyHash: 'broken' });
+      const result = await geo.reload('geoip');
+      assert.equal(result, null);
+      assert.ok(geo.getReloadError('geoip'));
+      assert.equal(geo.geoipReady(), true);
+      assert.equal(geo.inGeoipTag(parseIp('8.8.8.42'), 'us'), true);
+    },
+  },
+  {
+    name: 'geo index: memoized results stay consistent across repeated calls',
+    run: async () => {
+      idbData.clear();
+      await saveBlob('geoip.dat', await loadGeoipBytes(), { bodyHash: 'h1' });
+      await saveBlob('geosite.dat', await loadGeositeBytes(), { bodyHash: 'h2' });
+      await geo.reloadAll();
+      for (let i = 0; i < 3; i += 1) {
+        assert.equal(geo.inGeositeTag('foo.search.example', 'google'), true);
+        assert.equal(geo.inGeositeTag('other.example', 'google'), false);
+        assert.equal(geo.inGeositeTag('media.example', 'google', 'ads'), true);
+        assert.equal(geo.inGeositeTag('foo.search.example', 'google', 'ads'), false);
+        assert.equal(geo.inGeoipTag(parseIp('8.8.8.42'), 'us'), true);
+        assert.equal(geo.inGeoipTag(parseIp('9.9.9.9'), 'us'), false);
+      }
+    },
+  },
+  {
+    name: 'geo index: memo cache cleared on reload',
+    run: async () => {
+      idbData.clear();
+      await saveBlob('geosite.dat', await loadGeositeBytes(), { bodyHash: 'h2' });
+      assert.ok(await geo.reload('geosite'));
+      assert.equal(geo.inGeositeTag('foo.search.example', 'google'), true);
+      assert.equal(geo.inGeositeTag('foo.chat.example', 'cn'), true);
+      idbData.clear();
+      assert.ok(await geo.reload('geosite'));
+      assert.equal(geo.inGeositeTag('foo.search.example', 'google'), null);
+      assert.equal(geo.inGeositeTag('foo.chat.example', 'cn'), null);
+    },
+  },
+  {
+    name: 'geo index: reload with no stored blob succeeds as empty',
+    run: async () => {
+      idbData.clear();
+      const status = await geo.reload('geoip');
+      assert.ok(status);
+      assert.equal(status.tagCount, 0);
+      assert.equal(geo.geoipReady(), false);
+      assert.equal(geo.getReloadError('geoip'), null);
     },
   },
 ];

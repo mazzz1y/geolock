@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { Reader, WIRE_LENGTH_DELIMITED, WIRE_VARINT } from '../lib/protobuf-mini.js';
+import { Reader, WIRE_LENGTH_DELIMITED, WIRE_VARINT, WIRE_FIXED32, WIRE_FIXED64 } from '../lib/protobuf-mini.js';
 import { Writer } from './fixtures/protobuf-writer.mjs';
 
 export const tests = [
@@ -56,6 +56,34 @@ export const tests = [
       const next = reader.readTag();
       assert.equal(next.field, 2);
       assert.equal(reader.readString(), 'second');
+    },
+  },
+  {
+    name: 'skip fixed64 past end throws',
+    run: () => {
+      const reader = new Reader(new Uint8Array([1, 2, 3]));
+      assert.throws(() => reader.skip(WIRE_FIXED64), /past end/);
+    },
+  },
+  {
+    name: 'skip fixed32 past end throws',
+    run: () => {
+      const reader = new Reader(new Uint8Array([1, 2]));
+      assert.throws(() => reader.skip(WIRE_FIXED32), /past end/);
+    },
+  },
+  {
+    name: 'skip length-delimited past end throws',
+    run: () => {
+      const reader = new Reader(new Uint8Array([10, 0xff]));
+      assert.throws(() => reader.skip(WIRE_LENGTH_DELIMITED), /past end/);
+    },
+  },
+  {
+    name: 'skip varint past end throws',
+    run: () => {
+      const reader = new Reader(new Uint8Array([0x80]));
+      assert.throws(() => reader.skip(WIRE_VARINT), /past end/);
     },
   },
 ];

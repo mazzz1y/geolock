@@ -9,11 +9,14 @@ const HEARTBEAT_ALARM = 'geolock-update-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 60;
 const FETCH_TIMEOUT_MS = 30_000;
 
-export async function fetchWithTimeout(url, { timeoutMs = FETCH_TIMEOUT_MS, ...init } = {}) {
+export async function fetchWithTimeout(url, { timeoutMs = FETCH_TIMEOUT_MS, readBody = null, ...init } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { credentials: 'omit', ...init, signal: controller.signal });
+    const response = await fetch(url, { credentials: 'omit', ...init, signal: controller.signal });
+    if (!readBody) return response;
+    const body = response.ok ? await readBody(response) : null;
+    return { response, body };
   } finally {
     clearTimeout(timer);
   }
@@ -55,8 +58,7 @@ async function runUpdateDat(kind) {
 
   notifyDataChanged();
   try {
-    const bytes = await downloadAndVerify(kind, source);
-    const bodyHash = await sha256Hex(bytes);
+    const { bytes, bodyHash } = await downloadAndVerify(kind, source);
     const now = Date.now();
     const previousMeta = await loadBlobMeta(key);
 
@@ -95,9 +97,9 @@ async function runUpdateDat(kind) {
 }
 
 async function downloadAndVerify(kind, source) {
-  let response;
+  let response, buffer;
   try {
-    response = await fetchWithTimeout(source.url);
+    ({ response, body: buffer } = await fetchWithTimeout(source.url, { readBody: r => r.arrayBuffer() }));
   } catch (error) {
     lastError[kind] = String(error?.message ?? error);
     throw error;
@@ -105,11 +107,11 @@ async function downloadAndVerify(kind, source) {
   if (!response.ok) {
     throw fail(kind, `${kind} download failed: ${response.status}`);
   }
-  const buffer = await response.arrayBuffer();
   if (buffer.byteLength < 32) {
     throw fail(kind, `${kind}: file suspiciously small`);
   }
   const bytes = new Uint8Array(buffer);
+  const bodyHash = await sha256Hex(bytes);
 
   const shaUrl = (source.sha256_url ?? '').trim();
   if (shaUrl) {
@@ -117,18 +119,17 @@ async function downloadAndVerify(kind, source) {
     try { expected = await fetchSha256(shaUrl); }
     catch (error) { throw fail(kind, `${kind}: sha256 fetch failed (${error.message ?? error})`); }
     if (!expected) throw fail(kind, `${kind}: sha256 file did not contain a valid hash`);
-    const actual = await sha256Hex(bytes);
-    if (actual !== expected) {
-      throw fail(kind, `${kind}: sha256 mismatch (expected ${expected}, got ${actual})`);
+    if (bodyHash !== expected) {
+      throw fail(kind, `${kind}: sha256 mismatch (expected ${expected}, got ${bodyHash})`);
     }
   }
-  return bytes;
+  return { bytes, bodyHash };
 }
 
 async function fetchSha256(url) {
-  const response = await fetchWithTimeout(url);
+  const { response, body } = await fetchWithTimeout(url, { readBody: r => r.text() });
   if (!response.ok) throw new Error(`status ${response.status}`);
-  return parseSha256Sum(await response.text());
+  return parseSha256Sum(body);
 }
 
 function fail(kind, message) {
@@ -161,11 +162,11 @@ async function runUpdateRemoteConfig() {
 
   notifyDataChanged();
   try {
-    const response = await fetchWithTimeout(remote.url);
+    const { response, body } = await fetchWithTimeout(remote.url, { readBody: r => r.text() });
     if (!response.ok) throw new Error(`remote config fetch failed: ${response.status}`);
 
     let parsed;
-    try { parsed = JSON.parse(await response.text()); }
+    try { parsed = JSON.parse(body); }
     catch { throw new Error('remote config is not valid JSON'); }
 
     const { config: merged } = migrate(parsed);
@@ -173,8 +174,6 @@ async function runUpdateRemoteConfig() {
     if (!validation.ok) {
       throw new Error('remote config invalid: ' + validation.errors.map(e => `${e.path}: ${e.message}`).join('; '));
     }
-    merged.data_sources = mergeDataSources(config.data_sources, merged.data_sources);
-
     await saveConfig(merged);
     await browser.storage.local.set({ remote_last_applied_at: Date.now() });
     lastError.remote = null;
@@ -185,14 +184,6 @@ async function runUpdateRemoteConfig() {
   } finally {
     notifyDataChanged();
   }
-}
-
-export function mergeDataSources(current, incoming) {
-  const merged = {};
-  for (const key of ['geoip', 'geosite']) {
-    merged[key] = { ...current?.[key], ...(incoming?.[key] ?? {}) };
-  }
-  return merged;
 }
 
 export async function updateAll() {

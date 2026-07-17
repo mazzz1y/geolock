@@ -70,9 +70,13 @@ function matchGeosite(matcher, ctx, geo, trace) {
     trace?.push({ type: 'geosite', tag, attr, host, hit: null, note: 'empty host' });
     return UNDECIDED;
   }
-  const hit = geo.inGeositeTag(host, tag, attr);
-  trace?.push({ type: 'geosite', tag, attr, host, hit });
-  return hit;
+  const raw = geo.inGeositeTag(host, tag, attr);
+  if (raw === null) {
+    trace?.push({ type: 'geosite', tag, attr, host, hit: null, note: 'geosite db not loaded' });
+    return UNDECIDED;
+  }
+  trace?.push({ type: 'geosite', tag, attr, host, hit: raw });
+  return raw;
 }
 
 function matchGeoip(matcher, ctx, geo, trace) {
@@ -87,6 +91,10 @@ function matchGeoip(matcher, ctx, geo, trace) {
     return UNDECIDED;
   }
   const perIp = ips.map(ip => ({ ip: formatIp(ip), hit: geo.inGeoipTag(ip, tag) }));
+  if (perIp.some(item => item.hit === null)) {
+    trace?.push({ type: 'geoip', tag, ips: ips.map(formatIp), hit: null, note: 'geoip db not loaded' });
+    return UNDECIDED;
+  }
   const hit = perIp.some(item => item.hit);
   trace?.push({ type: 'geoip', tag, ips: ips.map(formatIp), hit, perIp });
   return hit;

@@ -32,20 +32,28 @@ export function _isReady() {
 const verdictCache = new Map();
 const VERDICT_CACHE_MAX = 100;
 
-export function cachePutVerdict(requestId, result) {
+export function cachePutVerdict(requestId, result, url) {
   if (requestId == null) return;
+  verdictCache.delete(requestId);
   if (verdictCache.size >= VERDICT_CACHE_MAX) {
     const oldest = verdictCache.keys().next().value;
     if (oldest !== undefined) verdictCache.delete(oldest);
   }
-  verdictCache.set(requestId, result);
+  verdictCache.set(requestId, { result, url });
 }
 
-export function cacheTakeVerdict(requestId) {
+export function cacheTakeVerdict(requestId, url) {
   if (requestId == null) return undefined;
   const cached = verdictCache.get(requestId);
-  if (cached !== undefined) verdictCache.delete(requestId);
-  return cached;
+  if (cached === undefined) return undefined;
+  verdictCache.delete(requestId);
+  if (cached.url !== url) return undefined;
+  return cached.result;
+}
+
+export function cacheDeleteVerdict(requestId) {
+  if (requestId == null) return;
+  verdictCache.delete(requestId);
 }
 
 export function _verdictCacheSize() {
@@ -92,25 +100,17 @@ function handleCommitted({ tabId, frameId, parentFrameId, url }) {
     frames = new Map();
     tabFrames.set(tabId, frames);
   }
-  frames.set(frameId, { host, url, parentFrameId });
   if (frameId === 0) {
-    for (const id of frames.keys()) {
-      if (id !== 0 && !isDescendant(frames, id, 0)) frames.delete(id);
-    }
+    frames.clear();
   }
-}
-
-function isDescendant(frames, frameId, ancestorId) {
-  let current = frames.get(frameId);
-  for (let depth = 0; current && depth < 64; depth += 1) {
-    if (current.parentFrameId === ancestorId) return true;
-    if (current.parentFrameId < 0) return false;
-    current = frames.get(current.parentFrameId);
-  }
-  return false;
+  frames.set(frameId, { host, url, parentFrameId });
 }
 
 export function deriveSourceContext(details, frames = tabFrames) {
+  if (details.type !== 'main_frame') {
+    const documentHost = extractHost(details.documentUrl);
+    if (documentHost) return { host: documentHost, url: details.documentUrl };
+  }
   if (details.tabId >= 0) {
     const frame = frames.get(details.tabId)?.get(details.frameId)
       ?? frames.get(details.tabId)?.get(0);
@@ -123,22 +123,32 @@ export function deriveSourceContext(details, frames = tabFrames) {
   return { host: '', url: '' };
 }
 
-async function handleBeforeRequest(details) {
-  if (!ready) await readyPromise;
-  const result = await evaluateRequest(details, {
+function evaluationDeps(trace) {
+  return {
     config: activeConfig,
     geo,
     dnsLookup: host => dnsCache.lookup(host),
     frames: tabFrames,
     selfOriginPrefix: SELF_ORIGIN_PREFIX,
     whenReady: () => geo.whenReady(),
-    trace: true,
-  });
-  if (details.type === 'main_frame' && activeConfigHasStripRule && result?.matchedRule) {
-    cachePutVerdict(details.requestId, result);
+    trace,
+  };
+}
+
+async function handleBeforeRequest(details) {
+  if (!ready) await readyPromise;
+  cacheDeleteVerdict(details.requestId);
+  let result = await evaluateRequest(details, evaluationDeps(false));
+  if (details.type === 'main_frame') {
+    if (activeConfigHasStripRule && result?.verdict === 'block' && matchedRuleStrips(result.matchedRule)) {
+      result = await evaluateRequest(details, evaluationDeps(true)) ?? result;
+      cachePutVerdict(details.requestId, result, details.url);
+    }
+    return undefined;
   }
   if (result?.verdict !== 'block') return undefined;
-  if (details.type === 'main_frame' && matchedRuleStrips(result.matchedRule)) return undefined;
+  const traced = await evaluateRequest(details, evaluationDeps(true));
+  if (traced?.verdict === 'block') result = traced;
 
   const tabId = details.tabId;
   const flush = blockLog.record(tabId, {
@@ -171,16 +181,14 @@ async function handleBeforeSendHeaders(details) {
   if (details.type !== 'main_frame') return undefined;
   const original = details.requestHeaders ?? [];
   if (!original.some(h => h.name.toLowerCase() === 'referer')) return undefined;
-  const cached = cacheTakeVerdict(details.requestId);
-  const result = cached ?? await evaluateRequest(details, {
-    config: activeConfig,
-    geo,
-    dnsLookup: host => dnsCache.lookup(host),
-    frames: tabFrames,
-    selfOriginPrefix: SELF_ORIGIN_PREFIX,
-    whenReady: () => geo.whenReady(),
-    trace: true,
-  });
+  const cached = cacheTakeVerdict(details.requestId, details.url);
+  let result = cached;
+  if (!result) {
+    result = await evaluateRequest(details, evaluationDeps(false));
+    if (result?.verdict !== 'block') return undefined;
+    if (!matchedRuleStrips(result.matchedRule)) return undefined;
+    result = await evaluateRequest(details, evaluationDeps(true)) ?? result;
+  }
   if (result?.verdict !== 'block') return undefined;
   if (!matchedRuleStrips(result.matchedRule)) return undefined;
   const tabId = details.tabId;
@@ -250,8 +258,11 @@ function applyMatchStrategy(ctx, strategy) {
 }
 
 function extractHost(url) {
-  try { return new URL(url).hostname.toLowerCase(); }
-  catch { return ''; }
+  try {
+    let host = new URL(url).hostname.toLowerCase();
+    if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+    return host;
+  } catch { return ''; }
 }
 
 function isSelfOriginated(details, selfOriginPrefix) {
@@ -263,7 +274,10 @@ function isSelfOriginated(details, selfOriginPrefix) {
 function isSameSite(a, b) {
   if (!a || !b) return false;
   if (a === b) return true;
-  return a.endsWith('.' + b) || b.endsWith('.' + a);
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (!longer.endsWith('.' + shorter)) return false;
+  return shorter.split('.').length >= 2;
 }
 
 async function resolveContextIps(ctx, dnsLookup) {

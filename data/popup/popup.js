@@ -53,21 +53,24 @@ async function updateFetchRemoteVisibility() {
 
 async function fetchRemoteConfig() {
   const button = document.getElementById('fetch-remote');
+  const errorNode = document.getElementById('fetch-remote-error');
   const originalText = button.textContent;
   button.disabled = true;
   button.textContent = 'Fetching…';
+  const showError = message => {
+    button.textContent = 'Failed';
+    errorNode.replaceChildren(document.createTextNode(`Fetch failed: ${message}`));
+  };
   try {
     const reply = await send({ kind: 'config.fetchRemote' });
     if (!reply?.ok) {
-      button.textContent = 'Failed';
-      button.title = reply?.error ?? 'unknown error';
+      showError(reply?.error ?? 'unknown error');
     } else {
       button.textContent = 'Applied';
-      button.title = '';
+      errorNode.replaceChildren();
     }
   } catch (error) {
-    button.textContent = 'Failed';
-    button.title = String(error?.message ?? error);
+    showError(String(error?.message ?? error));
   } finally {
     setTimeout(() => {
       button.textContent = originalText;

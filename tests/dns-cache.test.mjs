@@ -113,6 +113,78 @@ export const tests = [
     },
   },
   {
+    name: 'lookup: timeout is not negative-cached',
+    run: async () => {
+      const clock = fakeClock();
+      const resolver = makeResolver({ 'slow.test': 'never' });
+      const cache = createDnsCache({ resolver, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, timeoutMs: 100, negativeTtlMs: 30_000 });
+      const first = cache.lookup('slow.test');
+      clock.advance(101);
+      assert.deepEqual(await first, []);
+      const second = cache.lookup('slow.test');
+      clock.advance(101);
+      assert.deepEqual(await second, []);
+      assert.equal(resolver.calls, 2, 'timeout must not be cached for negative TTL');
+    },
+  },
+  {
+    name: 'lookup: late resolution after timeout populates cache',
+    run: async () => {
+      const clock = fakeClock();
+      let release;
+      const resolver = async () => new Promise(r => { release = r; });
+      let calls = 0;
+      const counting = host => { calls += 1; return resolver(host); };
+      const cache = createDnsCache({ resolver: counting, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, timeoutMs: 100, ttlMs: 60_000 });
+      const first = cache.lookup('late.test');
+      clock.advance(101);
+      assert.deepEqual(await first, []);
+      release({ addresses: ['1.2.3.4'] });
+      await new Promise(r => setTimeout(r, 0));
+      const second = await cache.lookup('late.test');
+      assert.equal(calls, 1, 'late result must be served from cache');
+      assert.equal(second.length, 1);
+      assert.equal(second[0].family, 4);
+    },
+  },
+  {
+    name: 'lookup: late resolution after clearCache is discarded',
+    run: async () => {
+      const clock = fakeClock();
+      let release;
+      const resolver = async () => new Promise(r => { release = r; });
+      let calls = 0;
+      const counting = host => { calls += 1; return resolver(host); };
+      const cache = createDnsCache({ resolver: counting, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, timeoutMs: 100, ttlMs: 60_000 });
+      const first = cache.lookup('gen.test');
+      clock.advance(101);
+      assert.deepEqual(await first, []);
+      cache.clearCache();
+      release({ addresses: ['1.2.3.4'] });
+      await new Promise(r => setTimeout(r, 0));
+      assert.equal(cache._stats().size, 0, 'late result after clearCache must not repopulate cache');
+      const second = cache.lookup('gen.test');
+      clock.advance(101);
+      assert.deepEqual(await second, []);
+      assert.equal(calls, 2, 'second lookup must hit the resolver');
+    },
+  },
+  {
+    name: 'lookup: late rejection after timeout does not poison cache',
+    run: async () => {
+      const clock = fakeClock();
+      let reject;
+      const resolver = async () => new Promise((_, r) => { reject = r; });
+      const cache = createDnsCache({ resolver, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, timeoutMs: 100 });
+      const first = cache.lookup('fail.test');
+      clock.advance(101);
+      assert.deepEqual(await first, []);
+      reject(new Error('boom'));
+      await new Promise(r => setTimeout(r, 0));
+      assert.equal(cache._stats().size, 0);
+    },
+  },
+  {
     name: 'lookup: LRU eviction at maxEntries',
     run: async () => {
       const clock = fakeClock();

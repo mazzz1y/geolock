@@ -64,12 +64,19 @@ async function refreshData() {
   if (!reply?.ok) return;
   renderDataCard(reply.status, reply.errors, reply.updating);
   renderRemoteTimestamps(reply.remoteLastAppliedAt);
+  renderRemoteError(reply.errors?.remote);
 }
 
 function renderRemoteTimestamps(appliedAt) {
   const node = $('remote-last-fetched');
   if (!node) return;
   node.textContent = appliedAt ? `Last applied ${new Date(appliedAt).toLocaleString()}` : '';
+}
+
+function renderRemoteError(error) {
+  const node = $('remote-error');
+  if (!node) return;
+  node.textContent = error ? `Last update error: ${error}` : '';
 }
 
 function renderAll() {
@@ -91,10 +98,15 @@ function renderDnsCard() {
 }
 
 function readDnsForm() {
+  const dns = currentConfig?.dns ?? {};
+  const numberOr = (id, fallback) => {
+    const raw = $(id).value.trim();
+    return raw === '' ? fallback : Number(raw);
+  };
   return {
-    cache_ttl_seconds: Number($('dns-ttl').value),
-    negative_cache_ttl_seconds: Number($('dns-neg-ttl').value),
-    timeout_ms: Number($('dns-timeout').value),
+    cache_ttl_seconds: numberOr('dns-ttl', dns.cache_ttl_seconds ?? 300),
+    negative_cache_ttl_seconds: numberOr('dns-neg-ttl', dns.negative_cache_ttl_seconds ?? 30),
+    timeout_ms: numberOr('dns-timeout', dns.timeout_ms ?? 5000),
     match_strategy: $('dns-match-strategy').value === 'all' ? 'all' : 'first',
   };
 }
@@ -124,7 +136,7 @@ function renderRules() {
 
 function renderRule(rule, index) {
   const card = elem('div', { class: `rule ${rule.enabled ? '' : 'disabled'}` });
-  const enabledToggle = elem('input', { type: 'checkbox', checked: rule.enabled });
+  const enabledToggle = elem('input', { type: 'checkbox', checked: rule.enabled, 'aria-label': `Enable rule ${rule.name || index + 1}` });
   enabledToggle.addEventListener('change', () => updateRule(index, { enabled: enabledToggle.checked }));
 
   const actionLabel = elem('span', { class: rule.action === 'block' ? 'action-block' : 'action-allow' }, rule.action.toUpperCase());
@@ -220,6 +232,7 @@ async function persist(config) {
     suppressNextRender = false;
     const detail = (reply?.errors ?? []).map(error => `${error.path}: ${error.message}`).join('; ');
     showCardBanner('rules-card', `Save failed: ${detail || reply?.error || 'unknown error'}`, 'error');
+    renderAll();
     return false;
   }
   currentConfig = reply.config;
@@ -272,7 +285,9 @@ function openRuleEditor(index) {
     const isolate = $('rule-type').value === 'isolate';
     const action = $('rule-action').value;
     const stripFlag = action === 'block' && $('rule-strip-referrer').checked;
-    const rule = isolate
+    let rule;
+    try {
+      rule = isolate
       ? {
           name: $('rule-name').value.trim(),
           enabled: $('rule-enabled').checked,
@@ -290,6 +305,10 @@ function openRuleEditor(index) {
           action,
           strip_referrer: stripFlag,
         };
+    } catch (error) {
+      $('rule-error').textContent = error.message;
+      return;
+    }
 
     const next = structuredClone(currentConfig);
     if (isNew) next.rules.push(rule);
@@ -468,9 +487,9 @@ function createMatcherEditor(node) {
     return elem('div', { class: 'matcher-child' },
       createMatcherEditor(childNode).element,
       elem('div', { class: 'matcher-child-controls' },
-        button('↑', () => swap(index, index - 1), { disabled: index === 0 }),
-        button('↓', () => swap(index, index + 1), { disabled: index === list.length - 1 }),
-        button('✕', () => { list.splice(index, 1); rerender(); }),
+        button('↑', () => swap(index, index - 1), { disabled: index === 0, 'aria-label': 'Move term up' }),
+        button('↓', () => swap(index, index + 1), { disabled: index === list.length - 1, 'aria-label': 'Move term down' }),
+        button('✕', () => { list.splice(index, 1); rerender(); }, { 'aria-label': 'Remove term' }),
       ),
     );
   }
@@ -616,6 +635,7 @@ function readRemoteForm() {
 
 function bindStaticEvents() {
   $('rule-add').addEventListener('click', () => openRuleEditor(-1));
+  $('rule-cancel').addEventListener('click', () => $('rule-dialog').close());
   $('test-run').addEventListener('click', runTester);
   $('test-clear').addEventListener('click', () => {
     $('test-source').value = '';
@@ -788,7 +808,13 @@ async function applyJson() {
   }
 }
 
+const flashStatusTimers = new Map();
+
 function setStatus(id, text, kind) {
+  if (flashStatusTimers.has(id)) {
+    clearTimeout(flashStatusTimers.get(id));
+    flashStatusTimers.delete(id);
+  }
   const node = $(id);
   node.textContent = text;
   node.className = `status-text ${kind}`;
@@ -796,7 +822,10 @@ function setStatus(id, text, kind) {
 
 function flashStatus(id, text, kind, ms) {
   setStatus(id, text, kind);
-  setTimeout(() => setStatus(id, '', 'muted'), ms);
+  flashStatusTimers.set(id, setTimeout(() => {
+    setStatus(id, '', 'muted');
+    flashStatusTimers.delete(id);
+  }, ms));
 }
 
 const cardBannerTimers = new Map();
@@ -821,7 +850,7 @@ function showCardBanner(cardId, text, kind = 'error', autoHideMs = 6000) {
 }
 
 function button(label, onClick, props = {}) {
-  return elem('button', { ...props, onclick: onClick }, label);
+  return elem('button', { type: 'button', ...props, onclick: onClick }, label);
 }
 
 function attachValidator(input, hint, { validate, message }) {
