@@ -1,0 +1,2 @@
+- Fix rule-set matchers not resolving DNS, so geoip-style rule-sets never matched
+- Fix rule-set entries in match traces missing tag, host, and IPs
