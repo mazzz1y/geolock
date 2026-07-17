@@ -4,72 +4,57 @@
   <img src=".github/logo.png" width="96" height="96" alt="GeoLock Logo">
 </p>
 
-GeoLock is a Firefox extension that blocks or allows sub-resource requests with per-page rules using v2fly geoip/geosite, domain regex, and IP range matchers.
+GeoLock is a Firefox extension that blocks or allows requests with per-page rules: geoip country, geosite category, sing-box rule-sets, domain regex, and IP ranges.
 
 [<img src="https://blog.mozilla.org/addons/files/2020/04/get-the-addon-fx-apr-2020.svg"
 alt="Get it on Firefox Add-ons"
 height="54">](https://addons.mozilla.org/firefox/addon/84ec3815000144658945/)
 
+## How it works
 
-## Features
-
-You write rules that combine a **source** (the page making the request) with a **destination** (what that page is loading), and decide whether to allow or block.
+Every time a page loads something — a script, an image, an API call — GeoLock checks your rules and lets it through or stops it.
 
 ![GeoLock options page](.github/screenshot.png)
 
-- Per-page rules: match on both the source and the destination it loads
-- Matcher types: geosite category, geoip country, domain regex, IP CIDR, composites (`and`, `or`, `not`)
-- Bidirectional rules, fire in both source↔destination directions
-- Isolate rules: fire when traffic crosses a boundary (source XOR destination is in a set)
-- v2fly geoip.dat and geosite.dat support
-- Remote configuration
-- In-memory LRU DNS cache
-- Built-in tester
-- Raw JSON editor, import/export, and one-click reset
+A rule pairs a **source** (the page making the request) with a **destination** (what it's loading). If both match, the rule fires with its action (allow or block). Rules run top to bottom, first match wins; if nothing matches, your default action applies.
 
 **Example rules:**
-- Block any cross-border resource: when on a US site, block non-US IP.
-- Allow only known CDNs when browsing a sensitive site.
-- Block any cross-US traffic in either direction with one isolate rule.
+- When on a US site, block resources resolving to non-US IPs
+- Allow only known CDNs on a sensitive site
+- Block all traffic between two countries with one isolate rule
 
-## How it works
+## Matchers
 
-Every time a page loads something — an image, a script, a tracking pixel, an API call — GeoLock checks your rules and decides whether to let it through or stop it.
+- **geoip** — country of the resolved IP (v2fly geoip.dat)
+- **geosite** — domain category like `google`, `category-ads-all` (v2fly geosite.dat)
+- **ruleset** — sing-box rule-set, binary `.srs` or JSON source format
+- **domain** — regex against the hostname
+- **url** — regex against the full URL
+- **ip** — CIDR range, IPv4 or IPv6
+- **any** — matches everything
+- **and / or / not** — combine the above
 
-Each rule answers two questions: **which page is making the request?** and **where is the request going?** If both sides match what you described, the rule fires and applies its action (allow or block). If no rule matches, GeoLock falls back to your default action.
+## Features
 
-Rules can be **bidirectional**, meaning they fire whether the page-and-resource pair appears in the order you wrote it or the reverse. Useful for symmetric "no traffic between X and Y" policies.
-
-There are also **isolate rules** for a common pattern: keep two worlds apart. You define a single boundary (say, "anything in the US"), and the rule fires whenever traffic crosses it — exactly one side of the request is inside, the other is outside. One short rule replaces two bidirectional rules with NOT.
-
-To describe the originating page or the request target, you pick a **matcher**:
-- match by country (resolved IP geolocation)
-- match by category (v2fly geosite tags like `google`, `category-ads-all`)
-- match by domain pattern (regex against the hostname)
-- match by URL pattern (regex against the full URL)
-- match by IP range (CIDR, IPv4 or IPv6)
-- match anything
-- combine the above with **and**, **or**, **not**
-
-Rules are evaluated in order, top to bottom. The first one that matches wins — so put your specific exceptions above your broad blocks.
+- **Bidirectional rules** — fire in both source↔destination directions
+- **Isolate rules** — define one boundary (say, "US") and fire whenever traffic crosses it
+- **Data sources by URL** — geoip/geosite databases and any number of named sing-box rule-sets, auto-updated on a schedule
+- **Remote configuration** — fetch and apply your config from a URL
+- Built-in rule tester, per-page block log with match traces
+- Raw JSON editor, import/export, one-click reset
+- In-memory DNS cache, no telemetry
 
 ## Configuration
 
-The actual config schema is documented in [`docs/config/v2.md`](docs/config/v2.md).
+Config schema: [`docs/config/v2.md`](docs/config/v2.md). Legacy v1 configs ([`docs/config/v1.md`](docs/config/v1.md)) migrate automatically.
 
-Legacy v1 configs (shipped through GeoLock 1.4.x) are documented in [`docs/config/v1.md`](docs/config/v1.md) and are migrated to v2 automatically on extension start and on import.
+## Firefox-only
 
-## Known issues
+GeoLock needs blocking `webRequest`, which Chrome MV3 removed, and geoip/CIDR matching needs the resolved destination IP, which declarativeNetRequest doesn't expose. Requires Firefox 142+.
 
-### Firefox-only
+## Disclaimer
 
-GeoLock uses blocking `webRequest`, which Chrome MV3 makes unavailable to extensions distributed through the Chrome Web Store (only enterprise policy-installed extensions retain webRequestBlocking). Geoip and CIDR matching require the resolved destination IP, which declarativeNetRequest does not expose in any rule condition. 
-
-**So the extension targets Firefox 142+ and is not portable to Chromium at that moment**
-
-### Disclaimer
-
-This extension is experimental and should be treated as a PoC. It may contain bugs, architectural flaws, or security issues
+Experimental; treat as a PoC. May contain bugs, architectural flaws, or security issues.
 
 ## License
 
