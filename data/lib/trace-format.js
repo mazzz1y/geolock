@@ -26,6 +26,7 @@ function describeTraceNode(node) {
     case 'any': return `${verdict} any`;
     case 'geosite': return `${verdict} geosite:${node.tag || '?'}${node.attr ? '@' + node.attr : ''} host=${node.host || '?'}${note}`;
     case 'geoip':   return `${verdict} geoip:${node.tag || '?'} ips=${formatIps(node.ips)}${note}`;
+    case 'ruleset': return `${verdict} ruleset:${node.tag || '?'} host=${node.host || '?'} ips=${formatIps(node.ips)}${note}`;
     case 'domain':  return `${verdict} domain:/${node.regex}/ host=${node.host || '?'}${note}`;
     case 'ip':      return `${verdict} ip:${node.cidr} ips=${formatIps(node.ips)}${note}`;
     case 'url':     return `${verdict} url:/${node.regex}/ url=${node.url || '?'}${note}`;
