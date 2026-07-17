@@ -1,0 +1,6 @@
+- New rule type: sing-box rule-sets. Add .srs (binary) or JSON source-format files by URL under Data sources, then reference them from "ruleset" matchers
+- Much faster geosite matching on every request
+- Security fixes: IPv6 literal and IPv4-mapped addresses no longer bypass IP/geoip rules; stricter CIDR and IPv6 parsing; no more fail-open window while geo databases reload
+- DNS timeouts are no longer cached as negative results
+- Main-frame navigations are never hard-blocked; only strip-referrer rules apply to top-level navigations
+- Options and popup fixes: rule dialog no longer discards edits on Enter, error surfacing, accessibility and layout
