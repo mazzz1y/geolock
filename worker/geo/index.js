@@ -2,6 +2,7 @@ import {
   scanCatalog,
   buildGeoipTagTrie, buildGeositeTagTrie,
 } from './dat-reader.js';
+import { parseRuleSet, buildRuleSetMatchers } from './srs-reader.js';
 import { loadBlob } from './store.js';
 
 const MATCH_CACHE_MAX = 4096;
@@ -117,6 +118,133 @@ function sumCounts(catalog) {
   return total;
 }
 
+const rulesets = new Map();
+let configuredRulesetNames = [];
+
+async function initRuleset(name) {
+  const key = `ruleset:${name}`;
+  try {
+    const { bytes, meta } = await loadBlob(key);
+    if (!bytes || !meta?.bodyHash) {
+      rulesets.delete(name);
+      flushRulesetCache(name);
+      return true;
+    }
+    const rawBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    rulesets.set(name, {
+      rawBytes,
+      blobMeta: meta,
+      domainTree: null,
+      ipRadix: null,
+      counts: null,
+      builtAt: null,
+      buildPromise: null,
+      lastError: null,
+    });
+    flushRulesetCache(name);
+    return true;
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    const existing = rulesets.get(name);
+    if (existing) existing.lastError = message;
+    else rulesets.set(name, { rawBytes: null, blobMeta: null, domainTree: null, ipRadix: null, counts: null, builtAt: null, buildPromise: null, lastError: message });
+    return false;
+  }
+}
+
+export async function ensureRuleset(name) {
+  const entry = rulesets.get(name);
+  if (!entry || entry.domainTree || !entry.rawBytes) return;
+  if (entry.buildPromise) return entry.buildPromise;
+  entry.buildPromise = (async () => {
+    try {
+      const parsed = await parseRuleSet(entry.rawBytes);
+      const built = buildRuleSetMatchers(parsed);
+      entry.domainTree = built.domainTree;
+      entry.ipRadix = built.ipRadix;
+      entry.counts = built.counts;
+      entry.builtAt = Date.now();
+      entry.lastError = null;
+      entry.rawBytes = null;
+      flushRulesetCache(name);
+    } catch (error) {
+      entry.lastError = String(error?.message ?? error);
+      entry.buildPromise = null;
+      throw error;
+    }
+  })();
+  return entry.buildPromise;
+}
+
+function flushRulesetCache(name) {
+  const prefix = `rs\n${name}\n`;
+  for (const key of [...matchCache.keys()]) {
+    if (key.startsWith(prefix)) matchCache.delete(key);
+  }
+}
+
+export async function reloadRuleset(name) {
+  const previous = rulesets.get(name) ?? null;
+  const ok = await initRuleset(name);
+  if (!ok) {
+    flushWebRequestCache();
+    return null;
+  }
+  if (rulesets.get(name)?.rawBytes) {
+    try { await ensureRuleset(name); }
+    catch (error) {
+      if (previous) {
+        previous.lastError = String(error?.message ?? error);
+        rulesets.set(name, previous);
+        flushRulesetCache(name);
+      }
+      flushWebRequestCache();
+      return null;
+    }
+  }
+  flushWebRequestCache();
+  return rulesetStatus(name);
+}
+
+export function inRuleset(name, host, ips) {
+  const entry = rulesets.get(name);
+  if (!entry?.domainTree) return null;
+  const hostLc = host ? String(host).toLowerCase() : '';
+  const ipList = Array.isArray(ips) ? ips.filter(ip => ip?.bytes) : [];
+  const key = `rs\n${name}\n${hostLc}\n${ipList.map(ip => `${ip.family}:${ip.bytes.join('.')}`).join(',')}`;
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+  let result = hostLc ? entry.domainTree.matchesAny(hostLc) : false;
+  if (!result) {
+    result = ipList.some(ip => entry.ipRadix.contains(ip.family, ip.bytes));
+  }
+  cacheSet(key, result);
+  return result;
+}
+
+export function rulesetLoaded(name) {
+  return !!rulesets.get(name)?.domainTree;
+}
+
+function rulesetStatus(name) {
+  const entry = rulesets.get(name);
+  return {
+    name,
+    savedAt: entry?.blobMeta?.savedAt ?? null,
+    sourceUrl: entry?.blobMeta?.sourceUrl ?? null,
+    shaVerified: !!entry?.blobMeta?.shaVerified,
+    builtAt: entry?.builtAt ?? null,
+    entryCount: entry?.counts
+      ? Object.values(entry.counts).reduce((a, b) => a + b, 0)
+      : 0,
+    error: entry?.lastError ?? null,
+  };
+}
+
+export function rulesetsStatus() {
+  return configuredRulesetNames.map(name => rulesetStatus(name));
+}
+
 export async function reload(kind) {
   const store = kind === 'geoip' ? geoip : kind === 'geosite' ? geosite : null;
   if (!store) return null;
@@ -126,8 +254,19 @@ export async function reload(kind) {
   return ok ? store.status() : null;
 }
 
-export async function reloadAll() {
-  await Promise.allSettled([geoip.init(), geosite.init()]);
+export async function reloadAll(rulesetNames = configuredRulesetNames) {
+  configuredRulesetNames = Array.isArray(rulesetNames) ? [...rulesetNames] : [];
+  for (const name of rulesets.keys()) {
+    if (!configuredRulesetNames.includes(name)) {
+      rulesets.delete(name);
+      flushRulesetCache(name);
+    }
+  }
+  await Promise.allSettled([
+    geoip.init(),
+    geosite.init(),
+    ...configuredRulesetNames.map(name => initRuleset(name)),
+  ]);
   markReady();
   flushWebRequestCache();
 }
@@ -180,7 +319,7 @@ function computeGeositeMatch(host, tag, attr) {
 }
 
 export function status() {
-  return { geoip: geoip.status(), geosite: geosite.status() };
+  return { geoip: geoip.status(), geosite: geosite.status(), rulesets: rulesetsStatus() };
 }
 
 export function getReloadError(kind) {

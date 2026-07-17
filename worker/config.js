@@ -48,6 +48,7 @@ function walkAgainstTemplate(input, template, path, errors) {
   }
   for (const key of Object.keys(template)) {
     if (MATCHER_KEYS.has(key)) continue;
+    if (key === 'rulesets' && path === '/data_sources') continue;
     const childTemplate = template[key];
     const childPath = `${path}/${key}`;
     const childInput = input[key];
@@ -129,9 +130,54 @@ function semanticChecks(input, errors) {
         semanticStream(stream, `/data_sources/${k}`, errors);
       }
     }
+    semanticRulesets(input.data_sources.rulesets, errors);
   }
   if (Array.isArray(input.rules)) {
     input.rules.forEach((rule, i) => semanticRule(rule, `/rules/${i}`, errors));
+  }
+}
+
+const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+const RULESET_MAX_COUNT = 64;
+const RULESET_STREAM_KEYS = new Set(['url', 'sha256_url', 'auto_update', 'interval_hours']);
+
+function semanticRulesets(rulesets, errors) {
+  if (rulesets === undefined) return;
+  if (!rulesets || typeof rulesets !== 'object' || Array.isArray(rulesets)) {
+    errors.push({ path: '/data_sources/rulesets', message: 'must be an object' });
+    return;
+  }
+  const names = Object.keys(rulesets);
+  if (names.length > RULESET_MAX_COUNT) {
+    errors.push({ path: '/data_sources/rulesets', message: `at most ${RULESET_MAX_COUNT} rulesets allowed` });
+    return;
+  }
+  for (const name of names) {
+    const path = `/data_sources/rulesets/${name}`;
+    if (name.length > 64 || !RULESET_NAME_RE.test(name)) {
+      errors.push({ path, message: 'invalid ruleset name' });
+      continue;
+    }
+    const stream = rulesets[name];
+    if (!stream || typeof stream !== 'object' || Array.isArray(stream)) {
+      errors.push({ path, message: 'must be an object' });
+      continue;
+    }
+    for (const key of Object.keys(stream)) {
+      if (!RULESET_STREAM_KEYS.has(key)) {
+        errors.push({ path: `${path}/${key}`, message: 'unknown field' });
+      }
+    }
+    if (stream.url !== undefined && typeof stream.url !== 'string') {
+      errors.push({ path: `${path}/url`, message: 'must be a string' });
+    }
+    if (stream.sha256_url !== undefined && typeof stream.sha256_url !== 'string') {
+      errors.push({ path: `${path}/sha256_url`, message: 'must be a string' });
+    }
+    if (stream.auto_update !== undefined && typeof stream.auto_update !== 'boolean') {
+      errors.push({ path: `${path}/auto_update`, message: 'must be boolean' });
+    }
+    semanticStream(stream, path, errors);
   }
 }
 
@@ -168,6 +214,7 @@ function semanticMatcher(matcher, path, errors) {
   switch (matcher.type) {
     case 'geosite':
     case 'geoip':
+    case 'ruleset':
       if (typeof matcher.tag !== 'string' || !matcher.tag) {
         errors.push({ path: `${path}/tag`, message: 'must be a non-empty string' });
       }
@@ -300,10 +347,26 @@ export function mergeWithDefaults(partial) {
     data_sources: {
       geoip: { ...base.data_sources.geoip, ...(partial.data_sources?.geoip ?? {}) },
       geosite: { ...base.data_sources.geosite, ...(partial.data_sources?.geosite ?? {}) },
+      rulesets: normalizeRulesets(partial.data_sources?.rulesets),
     },
     dns: { ...base.dns, ...(partial.dns ?? {}) },
     rules: Array.isArray(partial.rules) ? partial.rules.map(normalizeRule) : [],
   };
+}
+
+function normalizeRulesets(rulesets) {
+  if (!rulesets || typeof rulesets !== 'object' || Array.isArray(rulesets)) return {};
+  const out = {};
+  for (const [name, stream] of Object.entries(rulesets)) {
+    if (!stream || typeof stream !== 'object' || Array.isArray(stream)) continue;
+    out[name] = {
+      url: typeof stream.url === 'string' ? stream.url : '',
+      sha256_url: typeof stream.sha256_url === 'string' ? stream.sha256_url : '',
+      auto_update: stream.auto_update !== false,
+      interval_hours: Number.isFinite(stream.interval_hours) ? stream.interval_hours : 24,
+    };
+  }
+  return out;
 }
 
 function normalizeRule(rule) {

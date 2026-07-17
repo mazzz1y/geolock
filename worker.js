@@ -43,7 +43,13 @@ async function bootstrap() {
     enforcer.markReady();
   }
 
-  try { await geo.reloadAll(); }
+  let rulesetNames = [];
+  try {
+    const config = await loadConfig();
+    rulesetNames = Object.keys(config.data_sources?.rulesets ?? {});
+  } catch { /* ... */ }
+
+  try { await geo.reloadAll(rulesetNames); }
   catch (error) {
     console.error('GeoLock geo reload failed:', error);
     geo.forceReady();
@@ -55,6 +61,9 @@ async function bootstrap() {
   updater.updateIfStale('geoip').catch(() => {});
   updater.updateIfStale('geosite').catch(() => {});
   updater.updateIfStale('remote').catch(() => {});
+  for (const name of rulesetNames) {
+    updater.updateIfStale(`ruleset:${name}`).catch(() => {});
+  }
 }
 
 browser.storage.onChanged.addListener((changes, area) => {
@@ -71,6 +80,20 @@ browser.storage.onChanged.addListener((changes, area) => {
     const newUrl = newSource?.url ?? '';
     if (newUrl && newUrl !== oldUrl && newSource.auto_update !== false) {
       updater.updateDat(kind).catch(() => {});
+    }
+  }
+  const nextRulesets = next.data_sources?.rulesets ?? {};
+  const prevRulesets = prev?.data_sources?.rulesets ?? {};
+  const prevNames = Object.keys(prevRulesets);
+  const nextNames = Object.keys(nextRulesets);
+  if (nextNames.join('\n') !== prevNames.join('\n')) {
+    geo.reloadAll(nextNames).catch(() => {});
+  }
+  for (const name of nextNames) {
+    const newUrl = nextRulesets[name]?.url ?? '';
+    const oldUrl = prevRulesets[name]?.url ?? '';
+    if (newUrl && newUrl !== oldUrl && nextRulesets[name].auto_update !== false) {
+      updater.updateRuleset(name).catch(() => {});
     }
   }
 });
@@ -150,7 +173,9 @@ const handlers = {
 
   'data.update': async ({ target }) => {
     try {
-      const result = target === 'all' ? await updater.updateAll() : await updater.updateDat(target);
+      const result = target === 'all' ? await updater.updateAll()
+        : typeof target === 'string' && target.startsWith(updater.RULESET_PREFIX) ? await updater.updateRuleset(target.slice(updater.RULESET_PREFIX.length))
+        : await updater.updateDat(target);
       return { ok: true, result, status: geo.status() };
     } catch (error) {
       return { ok: false, error: String(error.message ?? error) };
@@ -167,6 +192,7 @@ const handlers = {
         geoip: updater.getLastError('geoip') ?? geo.getReloadError('geoip'),
         geosite: updater.getLastError('geosite') ?? geo.getReloadError('geosite'),
         remote: updater.getLastError('remote'),
+        rulesets: updater.getRulesetErrors(),
       },
       updating: updater.getProgress(),
       remoteLastAppliedAt: stored?.remote_last_applied_at ?? null,

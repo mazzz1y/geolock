@@ -188,6 +188,93 @@ export const tests = [
     },
   },
   {
+    name: 'lazy: ensureRuleset awaited before ruleset rule evaluates',
+    run: async () => {
+      let built = false;
+      const ensured = [];
+      const lazyGeo = {
+        ...geo,
+        inRuleset(name, host) {
+          if (name !== 'ads' || !built) return null;
+          return host === 'blocked.example';
+        },
+      };
+      const config = {
+        default_action: 'allow',
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'ads' }, action: 'block' }],
+      };
+      const result = await evaluate(config, {
+        source: { host: 'a' }, destination: { host: 'blocked.example' },
+      }, lazyGeo, {
+        ensureRuleset: async name => { ensured.push(name); built = true; },
+      });
+      assert.equal(result.verdict, 'block');
+      assert.deepEqual(ensured, ['ads']);
+    },
+  },
+  {
+    name: 'lazy: ruleset tags collected from nested and/or/not, ensured once per tag',
+    run: async () => {
+      const ensured = [];
+      const lazyGeo = { ...geo, inRuleset: () => false };
+      const config = {
+        default_action: 'allow',
+        rules: [
+          {
+            enabled: true,
+            source: { type: 'not', match: { type: 'ruleset', tag: 'a' } },
+            destination: {
+              type: 'and',
+              matches: [
+                { type: 'or', matches: [{ type: 'ruleset', tag: 'b' }, { type: 'ruleset', tag: 'a' }] },
+                { type: 'any' },
+              ],
+            },
+            action: 'block',
+          },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'a' }, action: 'block' },
+        ],
+      };
+      await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, lazyGeo, {
+        ensureRuleset: async name => { ensured.push(name); },
+      });
+      assert.deepEqual(ensured.sort(), ['a', 'b']);
+    },
+  },
+  {
+    name: 'lazy: ruleset rules not reached do not trigger ensureRuleset',
+    run: async () => {
+      const ensured = [];
+      const config = {
+        default_action: 'allow',
+        rules: [
+          { enabled: true, source: { type: 'any' }, destination: { type: 'any' }, action: 'block' },
+          { enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'later' }, action: 'block' },
+        ],
+      };
+      const result = await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, geo, {
+        ensureRuleset: async name => { ensured.push(name); },
+      });
+      assert.equal(result.verdict, 'block');
+      assert.deepEqual(ensured, []);
+    },
+  },
+  {
+    name: 'lazy: ensureRuleset failure leaves rule UNDECIDED and continues',
+    run: async () => {
+      const lazyGeo = { ...geo, inRuleset: () => null };
+      const config = {
+        default_action: 'allow',
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'broken' }, action: 'block' }],
+      };
+      const result = await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, lazyGeo, {
+        ensureRuleset: async () => { throw new Error('decode failed'); },
+      });
+      assert.equal(result.verdict, 'allow');
+      assert.equal(result.matchedRule, null);
+    },
+  },
+  {
     name: 'lazy: not-geoip triggers resolver',
     run: async () => {
       let sourceCalls = 0;

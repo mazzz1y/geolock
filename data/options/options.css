@@ -49,6 +49,7 @@ header .muted { margin: 0; }
 }
 
 .card h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.card h3 { margin: 0; font-size: 0.95rem; font-weight: 600; }
 .card > p { margin: 0; }
 
 .card-actions {
@@ -231,6 +232,14 @@ input.num-fixed { width: 90px; }
   color: var(--muted);
 }
 
+#data-rulesets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.data-row .meta:empty { display: none; }
+
 .data-row {
   display: flex;
   flex-direction: column;
@@ -247,6 +256,7 @@ input.num-fixed { width: 90px; }
   flex: 0 0 70px;
 }
 
+.data-row .ruleset-name-input { flex: 0 0 110px; }
 .data-row .meta { font-size: 12px; color: var(--muted); }
 .data-row .meta.error { color: var(--danger); }
 

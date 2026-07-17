@@ -184,6 +184,7 @@ function describeMatcher(matcher) {
     case 'any': return 'ANY';
     case 'geosite': return `geosite:${matcher.tag}${matcher.attr ? '@' + matcher.attr : ''}`;
     case 'geoip':   return `geoip:${matcher.tag}`;
+    case 'ruleset': return `ruleset:${matcher.tag}`;
     case 'domain':  return `domain:/${matcher.regex}/`;
     case 'url':     return `url:/${matcher.regex}/`;
     case 'ip':      return `ip:${matcher.cidr}`;
@@ -413,6 +414,28 @@ function createMatcherEditor(node) {
       return;
     }
 
+    if (node.type === 'ruleset') {
+      const names = Object.keys(currentConfig?.data_sources?.rulesets ?? {});
+      if (names.length > 0) {
+        const select = elem('select', { 'aria-label': 'Rule-set name' });
+        if (node.tag && !names.includes(node.tag)) {
+          select.appendChild(elem('option', { value: node.tag }, node.tag));
+        }
+        for (const name of names) select.appendChild(elem('option', { value: name }, name));
+        if (!node.tag) node.tag = select.value;
+        else select.value = node.tag;
+        select.addEventListener('change', () => { node.tag = select.value; });
+        headerRow.appendChild(select);
+      } else {
+        leafInput({
+          placeholder: 'rule-set name',
+          value: typeof node.tag === 'string' ? node.tag : '',
+          onChange: input => { node.tag = input.value.trim(); },
+        });
+      }
+      return;
+    }
+
     if (node.type === 'domain') {
       validatedLeaf({
         placeholder: 'regex (e.g. \\.example\\.com$)',
@@ -497,11 +520,13 @@ function createMatcherEditor(node) {
   return { element: root, read: () => serializeMatcher(node) };
 }
 
+const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+
 function renderDataCard(status, errors, updating = {}) {
   const allBtn = $('data-update-all');
-  const anyUpdating = !!(updating.geoip || updating.geosite);
+  const anyUpdating = !!(updating.geoip || updating.geosite || (updating.rulesets ?? []).length > 0);
   allBtn.disabled = anyUpdating;
-  allBtn.textContent = anyUpdating ? 'Updating…' : 'Update all now';
+  allBtn.textContent = anyUpdating ? 'Updating…' : 'Update all';
 
   for (const kind of ['geoip', 'geosite']) {
     const host = $(`data-${kind}`);
@@ -559,6 +584,179 @@ function renderDataCard(status, errors, updating = {}) {
       describeStatus(status?.[kind], errors?.[kind], isUpdating),
     );
   }
+
+  renderRulesets(status, errors, updating);
+}
+
+function renderRulesets(status, errors, updating) {
+  const host = $('data-rulesets');
+  host.replaceChildren();
+  const rulesets = currentConfig?.data_sources?.rulesets ?? {};
+  const names = Object.keys(rulesets);
+  const statusByName = new Map((status?.rulesets ?? []).map(item => [item.name, item]));
+  const updatingNames = new Set(updating?.rulesets ?? []);
+  for (const name of names) {
+    host.appendChild(renderRulesetRow(
+      name,
+      rulesets[name] ?? {},
+      statusByName.get(name),
+      errors?.rulesets?.[name],
+      updatingNames.has(name),
+    ));
+  }
+  host.appendChild(renderRulesetDraftRow());
+}
+
+function renderRulesetDraftRow() {
+  const row = elem('div', { class: 'data-row', id: 'ruleset-draft' });
+  row.append(
+    elem('div', { class: 'row' },
+      elem('input', {
+        type: 'text',
+        id: 'ruleset-draft-name',
+        class: 'ruleset-name-input',
+        placeholder: 'name (e.g. ads)',
+        autocomplete: 'off',
+        spellcheck: false,
+      }),
+      validatedInput({
+        type: 'url',
+        id: 'ruleset-draft-url',
+        placeholder: 'rule-set .srs URL (https)',
+        validate: value => value === '' || isHttpsUrl(value),
+        message: 'Must be an https URL',
+      }),
+      elem('div', { class: 'row-actions' },
+        button('Add', saveRulesetDraft),
+      ),
+    ),
+    elem('div', { class: 'meta', id: 'ruleset-draft-error', 'aria-live': 'polite' }),
+  );
+  return row;
+}
+
+async function saveRulesetDraft() {
+  const errorNode = $('ruleset-draft-error');
+  errorNode.className = 'meta error';
+  const name = $('ruleset-draft-name').value.trim();
+  const url = $('ruleset-draft-url').value.trim();
+  if (!name || name.length > 64 || !RULESET_NAME_RE.test(name)) {
+    errorNode.textContent = 'Name must match [a-z0-9][a-z0-9_-]* (max 64 chars)';
+    return;
+  }
+  if (currentConfig?.data_sources?.rulesets?.[name]) {
+    errorNode.textContent = 'A rule-set with this name already exists';
+    return;
+  }
+  if (url && !isHttpsUrl(url)) {
+    errorNode.textContent = 'URL must be https';
+    return;
+  }
+  errorNode.textContent = '';
+  const ok = await mutate(next => {
+    next.data_sources.rulesets = {
+      ...(next.data_sources.rulesets ?? {}),
+      [name]: { url, sha256_url: '', auto_update: true, interval_hours: 24 },
+    };
+  });
+  if (ok) await refreshData();
+  else errorNode.textContent = 'Invalid values';
+}
+
+function renderRulesetRow(name, source, meta, error, isUpdating) {
+  const row = elem('div', { class: 'data-row', 'data-ruleset': name });
+  row.append(
+    elem('div', { class: 'row' },
+      elem('span', { class: 'data-title' }, name),
+      validatedInput({
+        type: 'url',
+        placeholder: 'rule-set .srs URL (https)',
+        value: source.url ?? '',
+        validate: isHttpsUrl,
+        message: 'Must be an https URL',
+        'data-field': 'url',
+      }),
+    ),
+    elem('div', { class: 'row' },
+      elem('span', { class: 'data-title muted' }, 'sha256'),
+      validatedInput({
+        type: 'url',
+        placeholder: 'optional SHA-256 sum URL',
+        value: source.sha256_url ?? '',
+        validate: isHttpsUrl,
+        message: 'Must be an https URL or empty',
+        spellcheck: false,
+        'data-field': 'sha256_url',
+      }),
+    ),
+    elem('div', { class: 'row spaced' },
+      labelInline('Auto-update', elem('input', {
+        type: 'checkbox',
+        checked: source.auto_update ?? true,
+        'data-field': 'auto_update',
+      })),
+      labelInline('Interval (h)', elem('input', {
+        type: 'number',
+        min: '1',
+        class: 'num-fixed',
+        value: String(source.interval_hours ?? 24),
+        'data-field': 'interval_hours',
+      })),
+      elem('div', { class: 'row-actions' },
+        elem('span', { id: `data-ruleset-${name}-status`, class: 'status-text muted', 'aria-live': 'polite' }),
+        button('Save', () => saveRuleset(name)),
+        button(isUpdating ? 'Updating…' : 'Update', () => triggerDataUpdate(`ruleset:${name}`), {
+          disabled: isUpdating || !source.url,
+          title: source.url ? '' : 'Set a URL first',
+        }),
+        button('✕', () => removeRuleset(name), { class: 'danger', 'aria-label': `Remove rule-set ${name}` }),
+        isUpdating ? elem('span', { class: 'spinner', 'aria-label': 'updating' }) : null,
+      ),
+    ),
+    describeRulesetStatus(meta, error, isUpdating),
+  );
+  return row;
+}
+
+function describeRulesetStatus(meta, error, isUpdating) {
+  const props = { class: 'meta', 'aria-live': 'polite' };
+  if (isUpdating) return elem('div', props, 'Downloading…');
+  if (error) return elem('div', { ...props, class: 'meta error' }, `Error: ${error}`);
+  if (meta?.error) return elem('div', { ...props, class: 'meta error' }, `Error: ${meta.error}`);
+  if (!meta || !meta.savedAt) return elem('div', props, 'Not loaded');
+  const when = new Date(meta.savedAt).toLocaleString();
+  const verified = meta.shaVerified ? ' · sha verified' : '';
+  const entries = meta.builtAt ? ` · ${meta.entryCount} entries` : '';
+  return elem('div', props, `Loaded ${when}${entries}${verified}`);
+}
+
+function readRulesetForm(name) {
+  const host = document.querySelector(`[data-ruleset="${CSS.escape(name)}"]`);
+  const existing = currentConfig?.data_sources?.rulesets?.[name] ?? {};
+  return {
+    ...existing,
+    url: host.querySelector('[data-field="url"]').value.trim(),
+    sha256_url: host.querySelector('[data-field="sha256_url"]').value.trim(),
+    auto_update: host.querySelector('[data-field="auto_update"]').checked,
+    interval_hours: Number(host.querySelector('[data-field="interval_hours"]').value) || 24,
+  };
+}
+
+async function saveRuleset(name) {
+  const form = readRulesetForm(name);
+  const ok = await mutate(next => {
+    next.data_sources.rulesets = { ...(next.data_sources.rulesets ?? {}), [name]: form };
+  });
+  if (ok) flashStatus(`data-ruleset-${name}-status`, 'Saved', 'ok', 2000);
+  else setStatus(`data-ruleset-${name}-status`, 'Invalid values', 'error');
+}
+
+async function removeRuleset(name) {
+  if (!confirm(`Remove rule-set "${name}"?`)) return;
+  await mutate(next => {
+    if (next.data_sources.rulesets) delete next.data_sources.rulesets[name];
+  });
+  await refreshData();
 }
 
 function readDataSourceForm(kind) {
@@ -583,6 +781,9 @@ async function saveAllDataSources() {
   const ok = await mutate(next => {
     next.data_sources.geoip = readDataSourceForm('geoip');
     next.data_sources.geosite = readDataSourceForm('geosite');
+    for (const name of Object.keys(next.data_sources.rulesets ?? {})) {
+      next.data_sources.rulesets[name] = readRulesetForm(name);
+    }
   });
   if (ok) flashStatus('data-save-all-status', 'Saved', 'ok', 2000);
   else setStatus('data-save-all-status', 'Invalid values', 'error');

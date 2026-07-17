@@ -156,6 +156,36 @@ export const tests = [
     },
   },
   {
+    name: 'flat domain suffix tree: strict suffix excludes the domain itself',
+    run: () => {
+      const b = new FlatDomainSuffixTreeBuilder();
+      b.addStrictSuffix('example.com', 7);
+      const t = b.finish();
+      assert.equal(t.matchesAny('example.com'), false);
+      assert.equal(t.matchesAny('a.example.com'), true);
+      assert.equal(t.matchesAny('deep.a.example.com'), true);
+      assert.equal(t.matchesAny('badexample.com'), false);
+      setEqual(t.lookup('example.com'), []);
+      setEqual(t.lookup('a.example.com'), [7]);
+      setEqual(t.lookup('deep.a.example.com'), [7]);
+    },
+  },
+  {
+    name: 'flat domain suffix tree: strict and plain suffix coexist',
+    run: () => {
+      const b = new FlatDomainSuffixTreeBuilder();
+      b.addSuffix('foo.example', 1);
+      b.addStrictSuffix('bar.example', 2);
+      const t = b.finish();
+      assert.equal(t.matchesAny('foo.example'), true);
+      assert.equal(t.matchesAny('x.foo.example'), true);
+      assert.equal(t.matchesAny('bar.example'), false);
+      assert.equal(t.matchesAny('x.bar.example'), true);
+      setEqual(t.lookup('x.bar.example'), [2]);
+      setEqual(t.lookup('bar.example'), []);
+    },
+  },
+  {
     name: 'flat domain suffix tree builder: multiple entryIds per key',
     run: () => {
       const b = new FlatDomainSuffixTreeBuilder();

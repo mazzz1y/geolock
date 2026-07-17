@@ -128,6 +128,7 @@ function evaluationDeps(trace) {
     config: activeConfig,
     geo,
     dnsLookup: host => dnsCache.lookup(host),
+    ensureRuleset: name => geo.ensureRuleset(name),
     frames: tabFrames,
     selfOriginPrefix: SELF_ORIGIN_PREFIX,
     whenReady: () => geo.whenReady(),
@@ -216,7 +217,7 @@ function notifyBlocksChanged(tabId) {
   } catch { /* ... */ }
 }
 
-export async function evaluateRequest(details, { config, geo, dnsLookup, frames, selfOriginPrefix, whenReady, trace = false }) {
+export async function evaluateRequest(details, { config, geo, dnsLookup, ensureRuleset, frames, selfOriginPrefix, whenReady, trace = false }) {
   if (!config) return null;
   if (details.type === 'csp_report') return null;
   if (details.type === 'main_frame' && !configHasStripRule(config)) return null;
@@ -240,7 +241,7 @@ export async function evaluateRequest(details, { config, geo, dnsLookup, frames,
 
   try {
     return await evaluate(config, { source: sourceContext, destination: destinationContext }, geo,
-      { resolveSource: resolve, resolveDestination: resolve },
+      { resolveSource: resolve, resolveDestination: resolve, ensureRuleset },
       { trace });
   } catch (error) {
     console.error('GeoLock evaluate failed:', error);
@@ -313,7 +314,7 @@ export async function probe({ sourceUrl, destinationUrl, destinationIp }) {
     activeConfig ?? { default_action: 'allow', rules: [] },
     { source: sourceContext, destination: destinationContext },
     geo,
-    { resolveSource: resolve, resolveDestination: resolve },
+    { resolveSource: resolve, resolveDestination: resolve, ensureRuleset: name => geo.ensureRuleset(name) },
     { trace: true },
   );
 }

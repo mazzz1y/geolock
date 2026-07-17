@@ -1,10 +1,12 @@
 import { saveBlob, loadBlobMeta } from './geo/store.js';
 import * as geo from './geo/index.js';
 import { scanCatalog } from './geo/dat-reader.js';
+import { parseRuleSet } from './geo/srs-reader.js';
 import { saveConfig, loadConfig, validateConfig, loadRemoteSettings } from './config.js';
 import { migrate } from './config/migrations.js';
 
 const DAT_KEY = { geoip: 'geoip.dat', geosite: 'geosite.dat' };
+export const RULESET_PREFIX = 'ruleset:';
 const HEARTBEAT_ALARM = 'geolock-update-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 60;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -24,6 +26,8 @@ export async function fetchWithTimeout(url, { timeoutMs = FETCH_TIMEOUT_MS, read
 
 const lastError = { geoip: null, geosite: null, remote: null };
 const inFlight = { geoip: null, geosite: null, remote: null };
+const rulesetLastError = {};
+const rulesetInFlight = new Map();
 
 export function isStale({ lastCheckedAt, intervalHours, now = Date.now() }) {
   if (!lastCheckedAt) return true;
@@ -40,6 +44,60 @@ export function updateDat(kind) {
   const promise = runUpdateDat(kind).finally(() => { inFlight[kind] = null; });
   inFlight[kind] = promise;
   return promise;
+}
+
+export function updateRuleset(name) {
+  const existing = rulesetInFlight.get(name);
+  if (existing) return existing;
+  const promise = runUpdateRuleset(name).finally(() => { rulesetInFlight.delete(name); });
+  rulesetInFlight.set(name, promise);
+  return promise;
+}
+
+async function runUpdateRuleset(name) {
+  const key = `ruleset:${name}`;
+  const config = await loadConfig();
+  const source = config.data_sources?.rulesets?.[name];
+  if (!source?.url) throw new Error(`ruleset ${name}: url not configured`);
+
+  notifyDataChanged();
+  try {
+    const { bytes, bodyHash } = await downloadAndVerify(key, source);
+    const now = Date.now();
+    const previousMeta = await loadBlobMeta(key);
+
+    if (previousMeta?.bodyHash === bodyHash) {
+      await saveBlob(key, bytes, {
+        ...previousMeta,
+        sourceUrl: source.url,
+        shaVerified: !!source.sha256_url,
+        bodyHash,
+        savedAt: now,
+      });
+      rulesetLastError[name] = null;
+      return { unchanged: true, byteLength: bytes.length };
+    }
+
+    try {
+      await parseRuleSet(bytes);
+    } catch (error) {
+      throw fail(key, `ruleset ${name}: parse failed (${error.message ?? error})`);
+    }
+
+    await saveBlob(key, bytes, {
+      sourceUrl: source.url,
+      shaVerified: !!source.sha256_url,
+      bodyHash,
+      savedAt: now,
+    });
+    if (!await geo.reloadRuleset(name)) {
+      throw fail(key, `ruleset ${name}: reload after save returned no index`);
+    }
+    rulesetLastError[name] = null;
+    return { unchanged: false, byteLength: bytes.length };
+  } finally {
+    notifyDataChanged();
+  }
 }
 
 export function updateRemoteConfig() {
@@ -96,12 +154,17 @@ async function runUpdateDat(kind) {
   }
 }
 
+function setError(kind, message) {
+  if (kind.startsWith(RULESET_PREFIX)) rulesetLastError[kind.slice(RULESET_PREFIX.length)] = message;
+  else lastError[kind] = message;
+}
+
 async function downloadAndVerify(kind, source) {
   let response, buffer;
   try {
     ({ response, body: buffer } = await fetchWithTimeout(source.url, { readBody: r => r.arrayBuffer() }));
   } catch (error) {
-    lastError[kind] = String(error?.message ?? error);
+    setError(kind, String(error?.message ?? error));
     throw error;
   }
   if (!response.ok) {
@@ -133,7 +196,7 @@ async function fetchSha256(url) {
 }
 
 function fail(kind, message) {
-  lastError[kind] = message;
+  setError(kind, message);
   return new Error(message);
 }
 
@@ -193,6 +256,12 @@ export async function updateAll() {
     .map(kind => updateDat(kind)
       .then(value => [kind, value])
       .catch(error => [kind, { error: String(error.message ?? error) }]));
+  for (const [name, stream] of Object.entries(config.data_sources?.rulesets ?? {})) {
+    if (!stream?.url) continue;
+    tasks.push(updateRuleset(name)
+      .then(value => [`ruleset:${name}`, value])
+      .catch(error => [`ruleset:${name}`, { error: String(error.message ?? error) }]));
+  }
   return Object.fromEntries(await Promise.all(tasks));
 }
 
@@ -206,6 +275,16 @@ export async function updateIfStale(kind) {
       return { skipped: 'fresh' };
     }
     return updateDat(kind);
+  }
+  if (kind.startsWith(RULESET_PREFIX)) {
+    const name = kind.slice(RULESET_PREFIX.length);
+    const source = config.data_sources?.rulesets?.[name];
+    if (!shouldAutoUpdate(source)) return { skipped: 'disabled' };
+    const meta = await loadBlobMeta(`ruleset:${name}`);
+    if (meta?.savedAt && !isStale({ lastCheckedAt: meta.savedAt, intervalHours: source.interval_hours })) {
+      return { skipped: 'fresh' };
+    }
+    return updateRuleset(name);
   }
   if (kind === 'remote') {
     const remote = await loadRemoteSettings();
@@ -226,17 +305,33 @@ export async function ensureHeartbeatAlarm() {
   browser.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES });
 }
 
-export function handleAlarm(alarm) {
-  if (alarm?.name !== HEARTBEAT_ALARM) return Promise.resolve();
-  return Promise.allSettled([
+export async function handleAlarm(alarm) {
+  if (alarm?.name !== HEARTBEAT_ALARM) return;
+  const tasks = [
     updateIfStale('geoip'),
     updateIfStale('geosite'),
     updateIfStale('remote'),
-  ]);
+  ];
+  try {
+    const config = await loadConfig();
+    for (const name of Object.keys(config.data_sources?.rulesets ?? {})) {
+      tasks.push(updateIfStale(`ruleset:${name}`));
+    }
+  } catch { /* ... */ }
+  await Promise.allSettled(tasks);
 }
 
 export function getLastError(kind) {
+  if (kind.startsWith(RULESET_PREFIX)) return rulesetLastError[kind.slice(RULESET_PREFIX.length)] ?? null;
   return lastError[kind] ?? null;
+}
+
+export function getRulesetErrors() {
+  const out = {};
+  for (const [name, message] of Object.entries(rulesetLastError)) {
+    if (message) out[name] = message;
+  }
+  return out;
 }
 
 export function getProgress() {
@@ -244,5 +339,6 @@ export function getProgress() {
     geoip: !!inFlight.geoip,
     geosite: !!inFlight.geosite,
     remote: !!inFlight.remote,
+    rulesets: [...rulesetInFlight.keys()],
   };
 }

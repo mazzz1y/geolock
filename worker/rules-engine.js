@@ -7,11 +7,24 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
   const rules = Array.isArray(config?.rules) ? config.rules : [];
   let resolveSource = deps.resolveSource ?? null;
   let resolveDestination = deps.resolveDestination ?? null;
+  const ensureRuleset = deps.ensureRuleset ?? null;
+  const ensuredRulesets = ensureRuleset ? new Set() : null;
 
   for (let index = 0; index < rules.length; index++) {
     const raw = rules[index];
     if (!raw || raw.enabled === false) continue;
     const rule = desugarRule(raw);
+
+    if (ensureRuleset) {
+      const tags = new Set();
+      collectRulesetTags(rule.source, tags);
+      collectRulesetTags(rule.destination, tags);
+      for (const tag of tags) {
+        if (ensuredRulesets.has(tag)) continue;
+        ensuredRulesets.add(tag);
+        try { await ensureRuleset(tag); } catch { /* ... */ }
+      }
+    }
 
     const isBi = rule.bidirectional === true;
     const sourceNeedsIp = matcherNeedsIp(rule.source) || (isBi && matcherNeedsIp(rule.destination));
@@ -94,6 +107,20 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
     trace,
     contexts: summarizeContexts(contexts),
   };
+}
+
+function collectRulesetTags(m, out) {
+  if (!m || typeof m !== 'object') return;
+  if (m.type === 'ruleset') {
+    const tag = String(m.tag ?? '');
+    if (tag) out.add(tag);
+    return;
+  }
+  if (m.type === 'and' || m.type === 'or') {
+    if (Array.isArray(m.matches)) for (const child of m.matches) collectRulesetTags(child, out);
+    return;
+  }
+  if (m.type === 'not') collectRulesetTags(m.match, out);
 }
 
 function matcherNeedsIp(m) {

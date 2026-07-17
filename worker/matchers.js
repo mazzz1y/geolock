@@ -40,6 +40,8 @@ export function matches(matcher, ctx, geo, trace = null) {
       return matchGeosite(matcher, ctx, geo, trace);
     case 'geoip':
       return matchGeoip(matcher, ctx, geo, trace);
+    case 'ruleset':
+      return matchRuleset(matcher, ctx, geo, trace);
     case 'domain':
       return matchDomain(matcher, ctx, trace);
     case 'url':
@@ -98,6 +100,23 @@ function matchGeoip(matcher, ctx, geo, trace) {
   const hit = perIp.some(item => item.hit);
   trace?.push({ type: 'geoip', tag, ips: ips.map(formatIp), hit, perIp });
   return hit;
+}
+
+function matchRuleset(matcher, ctx, geo, trace) {
+  const tag = String(matcher.tag ?? '');
+  const host = ctx?.host ?? '';
+  const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
+  if (!tag) {
+    trace?.push({ type: 'ruleset', tag, host, ips: ips.map(formatIp), hit: false, note: 'empty tag' });
+    return false;
+  }
+  const raw = geo.inRuleset(tag, host, ips);
+  if (raw === null) {
+    trace?.push({ type: 'ruleset', tag, host, ips: ips.map(formatIp), hit: null, note: 'ruleset not loaded' });
+    return UNDECIDED;
+  }
+  trace?.push({ type: 'ruleset', tag, host, ips: ips.map(formatIp), hit: raw });
+  return raw;
 }
 
 function matchDomain(matcher, ctx, trace) {
