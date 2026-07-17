@@ -125,7 +125,7 @@ function collectRulesetTags(m, out) {
 
 function matcherNeedsIp(m) {
   if (!m || typeof m !== 'object') return false;
-  if (m.type === 'geoip' || m.type === 'ip') return true;
+  if (m.type === 'geoip' || m.type === 'ip' || m.type === 'ruleset') return true;
   if (m.type === 'and' || m.type === 'or') {
     return Array.isArray(m.matches) && m.matches.some(matcherNeedsIp);
   }

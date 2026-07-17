@@ -188,6 +188,24 @@ export const tests = [
     },
   },
   {
+    name: 'lazy: ruleset matcher triggers DNS resolution',
+    run: async () => {
+      let resolved = 0;
+      const config = {
+        default_action: 'allow',
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'ruleset', tag: 'r' }, action: 'block' }],
+      };
+      await evaluate(config, {
+        source: { host: 'a', ips: [] }, destination: { host: 'b', ips: [] },
+      }, { ...geo, inRuleset: () => false }, {
+        resolveSource: async () => {},
+        resolveDestination: async () => { resolved += 1; },
+        ensureRuleset: async () => {},
+      });
+      assert.equal(resolved, 1);
+    },
+  },
+  {
     name: 'lazy: ensureRuleset awaited before ruleset rule evaluates',
     run: async () => {
       let built = false;
