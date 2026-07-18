@@ -17,17 +17,25 @@ const ITEM_SOURCE_PORT = 7;
 const ITEM_SOURCE_PORT_RANGE = 8;
 const ITEM_PORT = 9;
 const ITEM_PORT_RANGE = 10;
+const ITEM_PROCESS_NAME = 11;
+const ITEM_PROCESS_PATH = 12;
+const ITEM_PACKAGE_NAME = 13;
+const ITEM_WIFI_SSID = 14;
+const ITEM_WIFI_BSSID = 15;
 const ITEM_ADGUARD = 16;
+const ITEM_PROCESS_PATH_REGEX = 17;
 const ITEM_NETWORK_TYPE = 18;
 const ITEM_NETWORK_IS_EXPENSIVE = 19;
 const ITEM_NETWORK_IS_CONSTRAINED = 20;
-const ITEM_WIFI_SSID = 21;
-const ITEM_WIFI_BSSID = 22;
+const ITEM_NETWORK_INTERFACE_ADDRESS = 21;
+const ITEM_DEFAULT_INTERFACE_ADDRESS = 22;
+const ITEM_PACKAGE_NAME_REGEX = 23;
 
 const STRING_LIST_ITEMS = new Set([
   ITEM_NETWORK, ITEM_DOMAIN_KEYWORD, ITEM_DOMAIN_REGEX,
   ITEM_SOURCE_PORT_RANGE, ITEM_PORT_RANGE,
-  11, 12, 13, 14, 15, 17, 23,
+  ITEM_PROCESS_NAME, ITEM_PROCESS_PATH, ITEM_PACKAGE_NAME,
+  ITEM_WIFI_SSID, ITEM_WIFI_BSSID, ITEM_PROCESS_PATH_REGEX, ITEM_PACKAGE_NAME_REGEX,
 ]);
 
 class ByteReader {
@@ -82,7 +90,7 @@ class ByteReader {
   }
 }
 
-function emptyParsed() {
+function emptyRule() {
   return { domains: [], suffixes: [], strictSuffixes: [], keywords: [], regexes: [], cidrs: [] };
 }
 
@@ -101,11 +109,13 @@ async function parseBinary(raw) {
   const payload = await inflate(raw.subarray(4));
   const reader = new ByteReader(payload);
   const ruleCount = reader.uvarint();
-  const parsed = emptyParsed();
+  const rules = [];
   for (let i = 0; i < ruleCount; i += 1) {
-    readRule(reader, parsed);
+    const rule = emptyRule();
+    readRule(reader, rule);
+    rules.push(rule);
   }
-  return parsed;
+  return { rules };
 }
 
 async function inflate(bytes) {
@@ -114,32 +124,32 @@ async function inflate(bytes) {
   return new Uint8Array(buffer);
 }
 
-function readRule(reader, parsed) {
+function readRule(reader, rule) {
   const type = reader.byte();
   if (type === RULE_LOGICAL) throw new Error('srs: logical rules are not supported');
   if (type !== RULE_DEFAULT) throw new Error(`srs: unknown rule type ${type}`);
   for (;;) {
     const item = reader.byte();
     if (item === ITEM_FINAL) break;
-    readRuleItem(reader, item, parsed);
+    readRuleItem(reader, item, rule);
   }
   const invert = reader.byte();
   if (invert !== 0) throw new Error('srs: inverted rules are not supported');
 }
 
-function readRuleItem(reader, item, parsed) {
+function readRuleItem(reader, item, rule) {
   switch (item) {
     case ITEM_DOMAIN:
-      readDomainSet(reader, parsed);
+      readDomainSet(reader, rule);
       return;
     case ITEM_DOMAIN_KEYWORD:
-      parsed.keywords.push(...readStringList(reader));
+      rule.keywords.push(...readStringList(reader));
       return;
     case ITEM_DOMAIN_REGEX:
-      parsed.regexes.push(...readStringList(reader));
+      rule.regexes.push(...readStringList(reader));
       return;
     case ITEM_IP_CIDR:
-      parsed.cidrs.push(...readIpSet(reader));
+      rule.cidrs.push(...readIpSet(reader));
       return;
     case ITEM_SOURCE_IP_CIDR:
       readIpSet(reader);
@@ -160,10 +170,9 @@ function readRuleItem(reader, item, parsed) {
     }
     case ITEM_NETWORK_IS_EXPENSIVE:
     case ITEM_NETWORK_IS_CONSTRAINED:
-      reader.byte();
       return;
-    case ITEM_WIFI_SSID:
-    case ITEM_WIFI_BSSID:
+    case ITEM_NETWORK_INTERFACE_ADDRESS:
+    case ITEM_DEFAULT_INTERFACE_ADDRESS:
       throw new Error(`srs: unsupported rule item ${item}`);
     default:
       if (STRING_LIST_ITEMS.has(item)) {
@@ -240,7 +249,7 @@ function rangeToCidrs(fromBytes, toBytes, family, out) {
 const PREFIX_LABEL = '\r';
 const ROOT_LABEL = '\n';
 
-function readDomainSet(reader, parsed) {
+function readDomainSet(reader, rule) {
   const flag = reader.byte();
   if (flag !== 0) throw new Error(`srs: unsupported domain set flag ${flag}`);
   const leaves = reader.uint64Slice();
@@ -258,21 +267,21 @@ function readDomainSet(reader, parsed) {
     else if (key[0] === ROOT_LABEL) rootSuffixes.push(key.slice(1));
     else domainMap.add(key);
   }
-  for (const suffix of rootSuffixes) parsed.suffixes.push(suffix);
+  for (const suffix of rootSuffixes) rule.suffixes.push(suffix);
   for (const rawPrefix of prefixSet) {
     if (rawPrefix[0] === '.') {
       const rootDomain = rawPrefix.slice(1);
       if (domainMap.has(rootDomain)) {
         domainMap.delete(rootDomain);
-        parsed.suffixes.push(rootDomain);
+        rule.suffixes.push(rootDomain);
         continue;
       }
-      parsed.strictSuffixes.push(rootDomain);
+      rule.strictSuffixes.push(rootDomain);
       continue;
     }
-    parsed.suffixes.push(rawPrefix);
+    rule.suffixes.push(rawPrefix);
   }
-  for (const domain of domainMap) parsed.domains.push(domain);
+  for (const domain of domainMap) rule.domains.push(domain);
 }
 
 function bitAt(words, index) {
@@ -329,28 +338,30 @@ function parseJsonSource(raw) {
   if (!doc || typeof doc !== 'object' || !Array.isArray(doc.rules)) {
     throw new Error('rule-set: JSON source must contain a rules array');
   }
-  const parsed = emptyParsed();
-  for (const rule of doc.rules) {
-    if (!rule || typeof rule !== 'object') throw new Error('rule-set: rule must be an object');
-    if (rule.type === 'logical' || rule.rules !== undefined) {
+  const rules = [];
+  for (const source of doc.rules) {
+    if (!source || typeof source !== 'object') throw new Error('rule-set: rule must be an object');
+    if (source.type === 'logical' || source.rules !== undefined) {
       throw new Error('rule-set: logical rules are not supported');
     }
-    if (rule.invert) throw new Error('rule-set: inverted rules are not supported');
-    for (const domain of asList(rule.domain)) parsed.domains.push(String(domain).toLowerCase());
-    for (const suffix of asList(rule.domain_suffix)) {
+    if (source.invert) throw new Error('rule-set: inverted rules are not supported');
+    const rule = emptyRule();
+    for (const domain of asList(source.domain)) rule.domains.push(String(domain).toLowerCase());
+    for (const suffix of asList(source.domain_suffix)) {
       const text = String(suffix).toLowerCase();
-      if (text.startsWith('.')) parsed.strictSuffixes.push(text.slice(1));
-      else parsed.suffixes.push(text);
+      if (text.startsWith('.')) rule.strictSuffixes.push(text.slice(1));
+      else rule.suffixes.push(text);
     }
-    for (const keyword of asList(rule.domain_keyword)) parsed.keywords.push(String(keyword));
-    for (const regex of asList(rule.domain_regex)) parsed.regexes.push(String(regex));
-    for (const entry of asList(rule.ip_cidr)) {
+    for (const keyword of asList(source.domain_keyword)) rule.keywords.push(String(keyword));
+    for (const regex of asList(source.domain_regex)) rule.regexes.push(String(regex));
+    for (const entry of asList(source.ip_cidr)) {
       const cidr = parseCidr(String(entry));
       if (!cidr) throw new Error(`rule-set: invalid ip_cidr entry "${entry}"`);
-      parsed.cidrs.push(cidr);
+      rule.cidrs.push(cidr);
     }
+    rules.push(rule);
   }
-  return parsed;
+  return { rules };
 }
 
 function asList(value) {
@@ -359,27 +370,42 @@ function asList(value) {
 }
 
 export function buildRuleSetMatchers(parsed) {
-  const domainBuilder = new FlatDomainSuffixTreeBuilder();
-  let entryId = 0;
-  for (const domain of parsed.domains) domainBuilder.addFull(domain, entryId++);
-  for (const suffix of parsed.suffixes) domainBuilder.addSuffix(suffix, entryId++);
-  for (const suffix of parsed.strictSuffixes) domainBuilder.addStrictSuffix(suffix, entryId++);
-  for (const keyword of parsed.keywords) domainBuilder.addPlain(keyword, entryId++);
-  for (const regex of parsed.regexes) domainBuilder.addRegex(regex, entryId++);
-
-  const ipBuilder = new FlatIpRadixBuilder();
-  for (const cidr of parsed.cidrs) ipBuilder.add(cidr.family, cidr.bytes, cidr.prefix);
-
-  return {
-    domainTree: domainBuilder.finish(),
-    ipRadix: ipBuilder.finish(),
-    counts: {
-      domains: parsed.domains.length,
-      suffixes: parsed.suffixes.length,
-      strictSuffixes: parsed.strictSuffixes.length,
-      keywords: parsed.keywords.length,
-      regexes: parsed.regexes.length,
-      cidrs: parsed.cidrs.length,
-    },
+  const counts = {
+    domains: 0, suffixes: 0, strictSuffixes: 0, keywords: 0, regexes: 0, cidrs: 0,
   };
+  const rules = [];
+  for (const rule of parsed.rules) {
+    const hasDomain = rule.domains.length || rule.suffixes.length
+      || rule.strictSuffixes.length || rule.keywords.length || rule.regexes.length;
+    const hasIp = rule.cidrs.length > 0;
+    if (!hasDomain && !hasIp) continue;
+
+    let domainTree = null;
+    if (hasDomain) {
+      const domainBuilder = new FlatDomainSuffixTreeBuilder();
+      let entryId = 0;
+      for (const domain of rule.domains) domainBuilder.addFull(domain, entryId++);
+      for (const suffix of rule.suffixes) domainBuilder.addSuffix(suffix, entryId++);
+      for (const suffix of rule.strictSuffixes) domainBuilder.addStrictSuffix(suffix, entryId++);
+      for (const keyword of rule.keywords) domainBuilder.addPlain(keyword, entryId++);
+      for (const regex of rule.regexes) domainBuilder.addRegex(regex, entryId++);
+      domainTree = domainBuilder.finish();
+    }
+
+    let ipRadix = null;
+    if (hasIp) {
+      const ipBuilder = new FlatIpRadixBuilder();
+      for (const cidr of rule.cidrs) ipBuilder.add(cidr.family, cidr.bytes, cidr.prefix);
+      ipRadix = ipBuilder.finish();
+    }
+
+    rules.push({ domainTree, ipRadix });
+    counts.domains += rule.domains.length;
+    counts.suffixes += rule.suffixes.length;
+    counts.strictSuffixes += rule.strictSuffixes.length;
+    counts.keywords += rule.keywords.length;
+    counts.regexes += rule.regexes.length;
+    counts.cidrs += rule.cidrs.length;
+  }
+  return { rules, counts };
 }

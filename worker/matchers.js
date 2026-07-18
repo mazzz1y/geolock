@@ -103,7 +103,7 @@ function matchGeoip(matcher, ctx, geo, trace) {
 }
 
 function matchRuleset(matcher, ctx, geo, trace) {
-  const tag = String(matcher.tag ?? '');
+  const tag = String(matcher.tag ?? '').toLowerCase();
   const host = ctx?.host ?? '';
   const ips = Array.isArray(ctx?.ips) ? ctx.ips.filter(ip => ip?.bytes) : [];
   if (!tag) {

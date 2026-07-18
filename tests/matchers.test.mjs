@@ -15,11 +15,17 @@ const fakeGeo = {
     if (attr) return false;
     return host.endsWith('search.example');
   },
+  inRuleset(tag, host, ips) {
+    if (tag !== 'ads') return null;
+    if (host && host.endsWith('blocked.example')) return true;
+    return ips.some(ip => ip.bytes[0] === 9);
+  },
 };
 
 const absentGeo = {
   inGeoipTag() { return null; },
   inGeositeTag() { return null; },
+  inRuleset() { return null; },
 };
 
 export const tests = [
@@ -57,6 +63,32 @@ export const tests = [
       const ctx = { host: 'h', ips: [parseIp('1.1.1.1'), parseIp('8.8.8.8')] };
       assert.equal(matches({ type: 'geoip', tag: 'us' }, ctx, fakeGeo), true);
       assert.equal(matches({ type: 'geoip', tag: 'cn' }, ctx, fakeGeo), true);
+    },
+  },
+  {
+    name: 'rule-set matches by host or ip',
+    run: () => {
+      assert.equal(matches({ type: 'rule-set', tag: 'ads' }, { host: 'a.blocked.example', ips: [] }, fakeGeo), true);
+      assert.equal(matches({ type: 'rule-set', tag: 'ads' }, { host: 'ok.example', ips: [parseIp('9.9.9.9')] }, fakeGeo), true);
+      assert.equal(matches({ type: 'rule-set', tag: 'ads' }, { host: 'ok.example', ips: [parseIp('8.8.8.8')] }, fakeGeo), false);
+    },
+  },
+  {
+    name: 'rule-set lowercases the tag',
+    run: () => {
+      assert.equal(matches({ type: 'rule-set', tag: 'ADS' }, { host: 'a.blocked.example', ips: [] }, fakeGeo), true);
+    },
+  },
+  {
+    name: 'rule-set empty tag is a non-match',
+    run: () => {
+      assert.equal(matches({ type: 'rule-set', tag: '' }, { host: 'a.blocked.example', ips: [] }, fakeGeo), false);
+    },
+  },
+  {
+    name: 'rule-set not loaded is UNDECIDED',
+    run: () => {
+      assert.equal(matches({ type: 'rule-set', tag: 'ads' }, { host: 'a.blocked.example', ips: [] }, absentGeo), UNDECIDED);
     },
   },
   {

@@ -18,6 +18,7 @@ function makeObjectStore() {
   return {
     get: key => makeRequest(() => idbData.get(key)),
     put: record => makeRequest(() => { idbData.set(record.key, record); }),
+    delete: key => makeRequest(() => { idbData.delete(key); }),
   };
 }
 

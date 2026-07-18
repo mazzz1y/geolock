@@ -3,7 +3,7 @@ import {
   buildGeoipTagTrie, buildGeositeTagTrie,
 } from './dat-reader.js';
 import { parseRuleSet, buildRuleSetMatchers } from './srs-reader.js';
-import { loadBlob } from './store.js';
+import { loadBlob, deleteBlob } from './store.js';
 
 const MATCH_CACHE_MAX = 4096;
 const matchCache = new Map();
@@ -134,8 +134,7 @@ async function initRuleset(name) {
     rulesets.set(name, {
       rawBytes,
       blobMeta: meta,
-      domainTree: null,
-      ipRadix: null,
+      rules: null,
       counts: null,
       builtAt: null,
       buildPromise: null,
@@ -147,21 +146,20 @@ async function initRuleset(name) {
     const message = String(error?.message ?? error);
     const existing = rulesets.get(name);
     if (existing) existing.lastError = message;
-    else rulesets.set(name, { rawBytes: null, blobMeta: null, domainTree: null, ipRadix: null, counts: null, builtAt: null, buildPromise: null, lastError: message });
+    else rulesets.set(name, { rawBytes: null, blobMeta: null, rules: null, counts: null, builtAt: null, buildPromise: null, lastError: message });
     return false;
   }
 }
 
 export async function ensureRuleset(name) {
   const entry = rulesets.get(name);
-  if (!entry || entry.domainTree || !entry.rawBytes) return;
+  if (!entry || entry.rules || !entry.rawBytes) return;
   if (entry.buildPromise) return entry.buildPromise;
   entry.buildPromise = (async () => {
     try {
       const parsed = await parseRuleSet(entry.rawBytes);
       const built = buildRuleSetMatchers(parsed);
-      entry.domainTree = built.domainTree;
-      entry.ipRadix = built.ipRadix;
+      entry.rules = built.rules;
       entry.counts = built.counts;
       entry.builtAt = Date.now();
       entry.lastError = null;
@@ -208,22 +206,29 @@ export async function reloadRuleset(name) {
 
 export function inRuleset(name, host, ips) {
   const entry = rulesets.get(name);
-  if (!entry?.domainTree) return null;
+  if (!entry?.rules) return null;
   const hostLc = host ? String(host).toLowerCase() : '';
   const ipList = Array.isArray(ips) ? ips.filter(ip => ip?.bytes) : [];
   const key = `rs\n${name}\n${hostLc}\n${ipList.map(ip => `${ip.family}:${ip.bytes.join('.')}`).join(',')}`;
   const cached = cacheGet(key);
   if (cached !== undefined) return cached;
-  let result = hostLc ? entry.domainTree.matchesAny(hostLc) : false;
-  if (!result) {
-    result = ipList.some(ip => entry.ipRadix.contains(ip.family, ip.bytes));
-  }
+  const result = entry.rules.some(rule => matchRule(rule, hostLc, ipList));
   cacheSet(key, result);
   return result;
 }
 
+function matchRule(rule, hostLc, ipList) {
+  if (rule.domainTree) {
+    if (!hostLc || !rule.domainTree.matchesAny(hostLc)) return false;
+  }
+  if (rule.ipRadix) {
+    if (!ipList.some(ip => rule.ipRadix.contains(ip.family, ip.bytes))) return false;
+  }
+  return true;
+}
+
 export function rulesetLoaded(name) {
-  return !!rulesets.get(name)?.domainTree;
+  return !!rulesets.get(name)?.rules;
 }
 
 function rulesetStatus(name) {
@@ -255,11 +260,17 @@ export async function reload(kind) {
 }
 
 export async function reloadAll(rulesetNames = configuredRulesetNames) {
+  const previousNames = configuredRulesetNames;
   configuredRulesetNames = Array.isArray(rulesetNames) ? [...rulesetNames] : [];
   for (const name of rulesets.keys()) {
     if (!configuredRulesetNames.includes(name)) {
       rulesets.delete(name);
       flushRulesetCache(name);
+    }
+  }
+  for (const name of previousNames) {
+    if (!configuredRulesetNames.includes(name)) {
+      deleteBlob(`rule-set:${name}`).catch(() => {});
     }
   }
   await Promise.allSettled([

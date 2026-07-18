@@ -17,8 +17,8 @@ function applyDnsConfig(dns) {
 }
 
 async function bootstrap() {
+  let config;
   try {
-    let config;
     try {
       config = await loadConfig();
     } catch (error) {
@@ -43,11 +43,7 @@ async function bootstrap() {
     enforcer.markReady();
   }
 
-  let rulesetNames = [];
-  try {
-    const config = await loadConfig();
-    rulesetNames = Object.keys(config.data_sources?.rule_sets ?? {});
-  } catch { /* ... */ }
+  const rulesetNames = Object.keys(config.data_sources?.rule_sets ?? {});
 
   try { await geo.reloadAll(rulesetNames); }
   catch (error) {
@@ -79,7 +75,9 @@ browser.storage.onChanged.addListener((changes, area) => {
     const oldUrl = prev?.data_sources?.[kind]?.url ?? '';
     const newUrl = newSource?.url ?? '';
     if (newUrl && newUrl !== oldUrl && newSource.auto_update !== false) {
-      updater.updateDat(kind).catch(() => {});
+      updater.updateDat(kind)
+        .then(result => (result?.skipped === 'source-changed' ? updater.updateDat(kind) : result))
+        .catch(() => {});
     }
   }
   const nextRulesets = next.data_sources?.rule_sets ?? {};
@@ -93,7 +91,9 @@ browser.storage.onChanged.addListener((changes, area) => {
     const newUrl = nextRulesets[name]?.url ?? '';
     const oldUrl = prevRulesets[name]?.url ?? '';
     if (newUrl && newUrl !== oldUrl && nextRulesets[name].auto_update !== false) {
-      updater.updateRuleset(name).catch(() => {});
+      updater.updateRuleset(name)
+        .then(result => (result?.skipped === 'source-changed' ? updater.updateRuleset(name) : result))
+        .catch(() => {});
     }
   }
 });

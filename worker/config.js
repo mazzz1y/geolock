@@ -137,7 +137,7 @@ function semanticChecks(input, errors) {
   }
 }
 
-const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const RULESET_MAX_COUNT = 64;
 const RULESET_STREAM_KEYS = new Set(['url', 'sha256_url', 'auto_update', 'interval_hours']);
 
@@ -359,7 +359,7 @@ function normalizeRulesets(rulesets) {
   const out = {};
   for (const [name, stream] of Object.entries(rulesets)) {
     if (!stream || typeof stream !== 'object' || Array.isArray(stream)) continue;
-    out[name] = {
+    out[name.toLowerCase()] = {
       url: typeof stream.url === 'string' ? stream.url : '',
       sha256_url: typeof stream.sha256_url === 'string' ? stream.sha256_url : '',
       auto_update: stream.auto_update !== false,

@@ -112,7 +112,7 @@ export async function evaluate(config, contexts, geo, deps = {}, { trace: collec
 function collectRulesetTags(m, out) {
   if (!m || typeof m !== 'object') return;
   if (m.type === 'rule-set') {
-    const tag = String(m.tag ?? '');
+    const tag = String(m.tag ?? '').toLowerCase();
     if (tag) out.add(tag);
     return;
   }

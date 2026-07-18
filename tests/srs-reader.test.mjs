@@ -50,6 +50,19 @@ function cidrStrings(cidrs) {
   return cidrs.map(c => `${[...c.bytes].join('.')}/${c.prefix}`).sort();
 }
 
+function flatten(parsed) {
+  const merged = { domains: [], suffixes: [], strictSuffixes: [], keywords: [], regexes: [], cidrs: [] };
+  for (const rule of parsed.rules) {
+    for (const key of Object.keys(merged)) merged[key].push(...rule[key]);
+  }
+  return merged;
+}
+
+function firstMatchers(parsed) {
+  const { rules } = buildRuleSetMatchers(parsed);
+  return rules[0] ?? { domainTree: null, ipRadix: null };
+}
+
 export const tests = [
   {
     name: 'srs: rejects bad magic',
@@ -64,7 +77,7 @@ export const tests = [
       await assert.rejects(() => parseRuleSet(buildSrs({ version: 6, rules: [] })), /version 6/);
       for (const version of [1, 2, 3, 4, 5]) {
         const parsed = await parseRuleSet(buildSrs({ version, rules: [] }));
-        assert.deepEqual(parsed.domains, []);
+        assert.deepEqual(parsed.rules, []);
       }
     },
   },
@@ -91,10 +104,10 @@ export const tests = [
           },
         }],
       });
-      const parsed = await parseRuleSet(bytes);
-      assert.deepEqual(parsed.keywords, ['tracker', 'ads']);
-      assert.deepEqual(parsed.regexes, ['^cdn\\d+\\.', '[']);
-      assert.deepEqual(cidrStrings(parsed.cidrs), [
+      const merged = flatten(await parseRuleSet(bytes));
+      assert.deepEqual(merged.keywords, ['tracker', 'ads']);
+      assert.deepEqual(merged.regexes, ['^cdn\\d+\\.', '[']);
+      assert.deepEqual(cidrStrings(merged.cidrs), [
         '10.0.0.0/24',
         '192.168.1.3/32',
         '192.168.1.4/30',
@@ -111,9 +124,10 @@ export const tests = [
         rules: [{ write: w => writeIpSetItem(w, 6, [{ from, to }]) }],
       });
       const parsed = await parseRuleSet(bytes);
-      assert.equal(parsed.cidrs.length, 3);
-      assert.deepEqual(parsed.cidrs.map(c => c.prefix).sort((a, b) => a - b), [127, 128, 128]);
-      const { ipRadix } = buildRuleSetMatchers(parsed);
+      const merged = flatten(parsed);
+      assert.equal(merged.cidrs.length, 3);
+      assert.deepEqual(merged.cidrs.map(c => c.prefix).sort((a, b) => a - b), [127, 128, 128]);
+      const { ipRadix } = firstMatchers(parsed);
       assert.equal(ipRadix.contains(6, parseIp('2001:db8::1').bytes), true);
       assert.equal(ipRadix.contains(6, parseIp('2001:db8::4').bytes), true);
       assert.equal(ipRadix.contains(6, parseIp('2001:db8::').bytes), false);
@@ -133,10 +147,11 @@ export const tests = [
         }],
       });
       const parsed = await parseRuleSet(bytes);
-      assert.deepEqual(parsed.domains.sort(), ['exact.example.org']);
-      assert.deepEqual(parsed.suffixes.sort(), ['example.com']);
-      assert.deepEqual(parsed.strictSuffixes.sort(), ['strict.net']);
-      const { domainTree } = buildRuleSetMatchers(parsed);
+      const merged = flatten(parsed);
+      assert.deepEqual(merged.domains.sort(), ['exact.example.org']);
+      assert.deepEqual(merged.suffixes.sort(), ['example.com']);
+      assert.deepEqual(merged.strictSuffixes.sort(), ['strict.net']);
+      const { domainTree } = firstMatchers(parsed);
       assert.equal(domainTree.matchesAny('exact.example.org'), true);
       assert.equal(domainTree.matchesAny('sub.exact.example.org'), false);
       assert.equal(domainTree.matchesAny('example.com'), true);
@@ -159,10 +174,11 @@ export const tests = [
         }],
       });
       const parsed = await parseRuleSet(bytes);
-      assert.deepEqual(parsed.suffixes.sort(), ['legacy.example']);
-      assert.deepEqual(parsed.strictSuffixes.sort(), ['only-subs.example']);
-      assert.deepEqual(parsed.domains, []);
-      const { domainTree } = buildRuleSetMatchers(parsed);
+      const merged = flatten(parsed);
+      assert.deepEqual(merged.suffixes.sort(), ['legacy.example']);
+      assert.deepEqual(merged.strictSuffixes.sort(), ['only-subs.example']);
+      assert.deepEqual(merged.domains, []);
+      const { domainTree } = firstMatchers(parsed);
       assert.equal(domainTree.matchesAny('legacy.example'), true);
       assert.equal(domainTree.matchesAny('a.legacy.example'), true);
       assert.equal(domainTree.matchesAny('only-subs.example'), false);
@@ -190,7 +206,8 @@ export const tests = [
         ],
       });
       const parsed = await parseRuleSet(bytes);
-      assert.deepEqual(parsed.keywords.sort(), ['one', 'two']);
+      assert.equal(parsed.rules.length, 2);
+      assert.deepEqual(flatten(parsed).keywords.sort(), ['one', 'two']);
     },
   },
   {
@@ -207,7 +224,6 @@ export const tests = [
             w.uvarint(1);
             w.bytes([0x01, 0xbb]);
             w.byte(19);
-            w.byte(1);
             w.byte(18);
             w.uvarint(2);
             w.bytes([0, 1]);
@@ -216,9 +232,9 @@ export const tests = [
           },
         }],
       });
-      const parsed = await parseRuleSet(bytes);
-      assert.deepEqual(parsed.keywords, ['kept']);
-      assert.deepEqual(parsed.cidrs, []);
+      const merged = flatten(await parseRuleSet(bytes));
+      assert.deepEqual(merged.keywords, ['kept']);
+      assert.deepEqual(merged.cidrs, []);
     },
   },
   {
@@ -257,13 +273,14 @@ export const tests = [
           },
         ],
       }));
-      assert.deepEqual(parsed.domains, ['one.example']);
-      assert.deepEqual(parsed.suffixes, ['example.com']);
-      assert.deepEqual(parsed.strictSuffixes, ['strict.example']);
-      assert.deepEqual(parsed.keywords, ['kw']);
-      assert.deepEqual(parsed.regexes, ['^a', '^b']);
-      assert.equal(parsed.cidrs.length, 2);
-      assert.equal(parsed.cidrs[1].prefix, 32);
+      const merged = flatten(parsed);
+      assert.deepEqual(merged.domains, ['one.example']);
+      assert.deepEqual(merged.suffixes, ['example.com']);
+      assert.deepEqual(merged.strictSuffixes, ['strict.example']);
+      assert.deepEqual(merged.keywords, ['kw']);
+      assert.deepEqual(merged.regexes, ['^a', '^b']);
+      assert.equal(merged.cidrs.length, 2);
+      assert.equal(merged.cidrs[1].prefix, 32);
     },
   },
   {
@@ -284,12 +301,10 @@ export const tests = [
       assert.equal(geo.inRuleset('ads', 'example.com', []), null);
 
       const bytes = buildSrs({
-        rules: [{
-          write: w => {
-            writeDomainSetItem(w, { suffixes: ['blocked.example'] });
-            writeIpSetItem(w, 6, [{ from: v4('9.9.9.9'), to: v4('9.9.9.9') }]);
-          },
-        }],
+        rules: [
+          { write: w => writeDomainSetItem(w, { suffixes: ['blocked.example'] }) },
+          { write: w => writeIpSetItem(w, 6, [{ from: v4('9.9.9.9'), to: v4('9.9.9.9') }]) },
+        ],
       });
       await saveBlob('rule-set:ads', bytes, { bodyHash: 'x'.repeat(64), sourceUrl: 'https://x/', shaVerified: false });
       assert.ok(await geo.reloadRuleset('ads'));
@@ -319,6 +334,28 @@ export const tests = [
     },
   },
   {
+    name: 'geo: inRuleset ANDs conditions within a single rule',
+    run: async () => {
+      idbData.clear();
+      const bytes = buildSrs({
+        rules: [{
+          write: w => {
+            writeDomainSetItem(w, { suffixes: ['corp.example'] });
+            writeIpSetItem(w, 6, [{ from: v4('9.9.9.9'), to: v4('9.9.9.9') }]);
+          },
+        }],
+      });
+      await saveBlob('rule-set:corp', bytes, { bodyHash: 'z'.repeat(64) });
+      await geo.reloadAll(['corp']);
+      await geo.ensureRuleset('corp');
+
+      assert.equal(geo.inRuleset('corp', 'a.corp.example', [parseIp('9.9.9.9')]), true);
+      assert.equal(geo.inRuleset('corp', 'a.corp.example', []), false);
+      assert.equal(geo.inRuleset('corp', 'a.corp.example', [parseIp('8.8.8.8')]), false);
+      assert.equal(geo.inRuleset('corp', 'other.example', [parseIp('9.9.9.9')]), false);
+    },
+  },
+  {
     name: 'geo: reload keeps previous data and reports error on bad blob',
     run: async () => {
       idbData.clear();
@@ -335,6 +372,23 @@ export const tests = [
       assert.equal(await geo.reloadRuleset('r1'), null);
       assert.equal(geo.inRuleset('r1', 'x.ok.example', []), true);
       assert.match(geo.rulesetsStatus().find(r => r.name === 'r1').error, /not a valid/);
+    },
+  },
+  {
+    name: 'geo: reloadAll deletes blobs of removed rule-sets',
+    run: async () => {
+      idbData.clear();
+      const bytes = buildSrs({
+        rules: [{ write: w => writeDomainSetItem(w, { suffixes: ['gone.example'] }) }],
+      });
+      await saveBlob('rule-set:gone', bytes, { bodyHash: 'g'.repeat(64) });
+      await geo.reloadAll(['gone']);
+      assert.ok(idbData.has('rule-set:gone'));
+
+      await geo.reloadAll([]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(idbData.has('rule-set:gone'), false, 'removed rule-set blob must be deleted');
+      assert.equal(idbData.has('rule-set:gone:meta'), false, 'removed rule-set meta must be deleted');
     },
   },
   {

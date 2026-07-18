@@ -224,4 +224,25 @@ export const tests = [
       assert.equal(applied.data_sources.geosite.url, '');
     },
   },
+  {
+    name: 'updateDat: discards download when source url changed mid-flight',
+    run: async () => {
+      idbData.clear();
+      localStore.clear();
+      const bytes = new Uint8Array(await readFile(join(here, 'fixtures', 'tiny-geoip.dat')));
+      const config = await loadConfig();
+      config.data_sources.geoip.url = 'https://dat.example/original.dat';
+      await saveConfig(config);
+
+      const fetchStub = async () => {
+        const next = await loadConfig();
+        next.data_sources.geoip.url = 'https://dat.example/changed.dat';
+        await saveConfig(next);
+        return { ok: true, status: 200, arrayBuffer: async () => bytes.buffer.slice(0) };
+      };
+      const result = await withFetch(fetchStub, () => updateDat('geoip'));
+      assert.equal(result.skipped, 'source-changed');
+      assert.equal(idbData.has('geoip.dat'), false, 'stale download must not be persisted');
+    },
+  },
 ];

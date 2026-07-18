@@ -50,6 +50,13 @@ export async function saveBlob(key, bytes, meta = {}) {
   });
 }
 
+export async function deleteBlob(key) {
+  return withStore('readwrite', store => {
+    store.delete(key);
+    store.delete(metaKey(key));
+  });
+}
+
 function stripKey(record) {
   if (!record) return null;
   const { key: _k, ...meta } = record;

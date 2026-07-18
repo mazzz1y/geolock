@@ -430,7 +430,7 @@ function createMatcherEditor(node) {
         leafInput({
           placeholder: 'rule-set name',
           value: typeof node.tag === 'string' ? node.tag : '',
-          onChange: input => { node.tag = input.value.trim(); },
+          onChange: input => { node.tag = input.value.trim().toLowerCase(); },
         });
       }
       return;
@@ -520,7 +520,7 @@ function createMatcherEditor(node) {
   return { element: root, read: () => serializeMatcher(node) };
 }
 
-const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+const RULESET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
 function renderDataCard(status, errors, updating = {}) {
   const allBtn = $('data-update-all');
@@ -793,7 +793,7 @@ function describeStatus(meta, error, isUpdating) {
   const props = { class: 'meta', 'aria-live': 'polite' };
   if (isUpdating) return elem('div', props, 'Downloading…');
   if (error) return elem('div', { ...props, class: 'meta error' }, `Error: ${error}`);
-  if (!meta) return elem('div', props, 'Not loaded');
+  if (!meta || !meta.savedAt) return elem('div', props, 'Not loaded');
   const when = meta.savedAt ? new Date(meta.savedAt).toLocaleString() : '—';
   const verified = meta.shaVerified ? ' · sha verified' : '';
   return elem('div', props, `Loaded ${when} · ${meta.tagCount} tags · ${meta.entryCount} entries${verified}`);

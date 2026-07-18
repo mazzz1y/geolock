@@ -63,6 +63,9 @@ async function runUpdateRuleset(name) {
   notifyDataChanged();
   try {
     const { bytes, bodyHash } = await downloadAndVerify(key, source);
+    if (await sourceUrlChanged('rule-set', name, source.url)) {
+      return { skipped: 'source-changed' };
+    }
     const now = Date.now();
     const previousMeta = await loadBlobMeta(key);
 
@@ -117,6 +120,9 @@ async function runUpdateDat(kind) {
   notifyDataChanged();
   try {
     const { bytes, bodyHash } = await downloadAndVerify(kind, source);
+    if (await sourceUrlChanged(kind, null, source.url)) {
+      return { skipped: 'source-changed' };
+    }
     const now = Date.now();
     const previousMeta = await loadBlobMeta(key);
 
@@ -152,6 +158,16 @@ async function runUpdateDat(kind) {
   } finally {
     notifyDataChanged();
   }
+}
+
+async function sourceUrlChanged(kind, name, downloadedUrl) {
+  let config;
+  try { config = await loadConfig(); }
+  catch { return false; }
+  const current = kind === 'rule-set'
+    ? config.data_sources?.rule_sets?.[name]?.url
+    : config.data_sources?.[kind]?.url;
+  return current !== downloadedUrl;
 }
 
 function setError(kind, message) {

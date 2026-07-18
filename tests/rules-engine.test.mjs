@@ -260,6 +260,21 @@ export const tests = [
     },
   },
   {
+    name: 'lazy: uppercase ruleset tag is ensured lowercase',
+    run: async () => {
+      const ensured = [];
+      const lazyGeo = { ...geo, inRuleset: () => false };
+      const config = {
+        default_action: 'allow',
+        rules: [{ enabled: true, source: { type: 'any' }, destination: { type: 'rule-set', tag: 'ADS' }, action: 'block' }],
+      };
+      await evaluate(config, { source: { host: 'x' }, destination: { host: 'y' } }, lazyGeo, {
+        ensureRuleset: async name => { ensured.push(name); },
+      });
+      assert.deepEqual(ensured, ['ads']);
+    },
+  },
+  {
     name: 'lazy: ruleset rules not reached do not trigger ensureRuleset',
     run: async () => {
       const ensured = [];
