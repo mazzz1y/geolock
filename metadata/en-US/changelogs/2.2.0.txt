@@ -1,0 +1,5 @@
+- Fix rule-set matching: conditions within a single sing-box rule now combine with AND (domain and IP), and rules combine with OR, matching sing-box semantics
+- Fix parsing of some .srs binary rule-sets: corrected item handling that could misread rules using network flags or newer format versions
+- Rule-set names and matcher tags are now case-insensitive: uppercase names are accepted and normalized instead of silently never matching
+- Removing a rule-set now deletes its cached data instead of leaving it behind
+- Changing a data source or rule-set URL no longer risks saving the old download under the new URL, and the new URL is fetched right away
